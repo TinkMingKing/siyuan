@@ -8,7 +8,8 @@ declare const katex: {
     renderToString(math: string, option: {
         displayMode: boolean;
         output: string;
-        macros: IObject
+        macros: IObject;
+        strict: string;
     }): string;
 };
 
@@ -45,7 +46,8 @@ export const mathRender = (element: Element, cdn = Constants.PROTYLE_CDN, maxWid
                     renderElement.innerHTML = katex.renderToString(Lute.UnEscapeHTMLStr(mathElement.getAttribute("data-content")), {
                         displayMode: mathElement.tagName === "DIV",
                         output: "html",
-                        macros
+                        macros,
+                        strict: false
                     });
                     renderElement.classList.remove("ft__error");
                     const blockElement = hasClosestBlock(mathElement);
