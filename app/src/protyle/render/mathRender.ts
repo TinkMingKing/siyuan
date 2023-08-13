@@ -9,7 +9,7 @@ declare const katex: {
         displayMode: boolean;
         output: string;
         macros: IObject;
-        strict: string;
+        strict: (errorCode:string) =>  'ignore' | 'warn';
     }): string;
 };
 
