@@ -47,7 +47,7 @@ export const mathRender = (element: Element, cdn = Constants.PROTYLE_CDN, maxWid
                         displayMode: mathElement.tagName === "DIV",
                         output: "html",
                         macros,
-                        strict: false
+                        strict: (errorCode) => errorCode === 'unicodeTextInMathMode' ? 'ignore' : 'warn'
                     });
                     renderElement.classList.remove("ft__error");
                     const blockElement = hasClosestBlock(mathElement);
