@@ -578,6 +578,7 @@ export const removeBlock = async (protyle: IProtyle, blockElement: Element, rang
         // extractContents 内容过多时需要进行滚动条重置，否则位置会错位
         protyle.contentElement.scrollTop = scroll;
         protyle.scroll.lastScrollTop = scroll - 1;
+        previousLastElement.setAttribute(Constants.ATTRIBUTE_EDITING, "true");
         doOperations.push({
             action: "update",
             data: previousLastElement.outerHTML,
@@ -622,7 +623,7 @@ export const removeImage = (imgSelectElement: Element, nodeElement: HTMLElement,
     }
     imgSelectElement.insertAdjacentHTML("afterend", "<wbr>");
     imgSelectElement.remove();
-    updateTransaction(protyle, nodeElement.getAttribute("data-node-id"), nodeElement.outerHTML, oldHTML);
+    updateTransaction(protyle, nodeElement, oldHTML);
     focusByWbr(nodeElement, range);
     // 不太清楚为什么删除图片后无法上下键定位，但重绘后就好了 https://ld246.com/article/1714314625702
     const editElement = getContenteditableElement(nodeElement);
@@ -650,6 +651,8 @@ const removeLi = (protyle: IProtyle, blockElement: Element, range: Range, isDele
         if (listElement.getAttribute("data-subtype") === "o") {
             updateListOrder(listElement);
         }
+        listElement.setAttribute(Constants.ATTRIBUTE_EDITING, "true");
+        previousLastElement.parentElement.setAttribute(Constants.ATTRIBUTE_EDITING, "true");
         transaction(protyle, [{
             action: "update",
             id: listElement.getAttribute("data-node-id"),
@@ -843,7 +846,7 @@ const removeLi = (protyle: IProtyle, blockElement: Element, range: Range, isDele
         if (listElement.getAttribute("data-subtype") === "o") {
             updateListOrder(listElement);
         }
-        updateTransaction(protyle, listElement.getAttribute("data-node-id"), listElement.outerHTML, html);
+        updateTransaction(protyle, listElement, html);
     }
     focusByWbr(previousLastElement.parentElement, range);
 };

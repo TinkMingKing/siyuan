@@ -26,8 +26,9 @@ import (
 )
 
 type AI struct {
-	OpenAI *OpenAI    `json:"openAI"`
-	MCP    *MCPConfig `json:"mcp"`
+	OpenAI    *OpenAI    `json:"openAI"`
+	MCP       *MCPConfig `json:"mcp"`
+	Providers []*OpenAI  `json:"providers,omitempty"`
 }
 
 type MCPConfig struct {
@@ -57,12 +58,11 @@ type OpenAI struct {
 	APIUserAgent        string  `json:"apiUserAgent"`
 	APIProvider         string  `json:"apiProvider"` // OpenAI, Azure
 	APIVersion          string  `json:"apiVersion"`  // Azure API version
-	EmbeddingModel      string  `json:"embeddingModel"`
-	EmbeddingBaseURL    string  `json:"embeddingBaseURL"`
-	EmbeddingAPIKey     string  `json:"embeddingAPIKey"`
+	Type                string  `json:"type,omitempty"`      // empty or "chat" = chat model, "embedding" = embedding model
 	AgentTimeout        int     `json:"agentTimeout"`        // total session timeout, seconds, 0 = no limit
 	AgentConfirmTimeout int     `json:"agentConfirmTimeout"` // confirmation timeout, seconds
 	AgentMaxRetries     int     `json:"agentMaxRetries"`     // max API retry attempts on failure
+	Enabled             *bool   `json:"enabled,omitempty"`
 }
 
 func NewAI() *AI {
@@ -120,14 +120,19 @@ func NewAI() *AI {
 	if userAgent := os.Getenv("SIYUAN_OPENAI_API_USER_AGENT"); "" != userAgent {
 		openAI.APIUserAgent = userAgent
 	}
-	if embeddingBaseURL := os.Getenv("SIYUAN_OPENAI_EMBEDDING_BASE_URL"); "" != embeddingBaseURL {
-		openAI.EmbeddingBaseURL = embeddingBaseURL
-	}
-	if embeddingAPIKey := os.Getenv("SIYUAN_OPENAI_EMBEDDING_API_KEY"); "" != embeddingAPIKey {
-		openAI.EmbeddingAPIKey = embeddingAPIKey
-	}
-	if embeddingModel := os.Getenv("SIYUAN_OPENAI_EMBEDDING_MODEL"); "" != embeddingModel {
-		openAI.EmbeddingModel = embeddingModel
+	embeddingAPIKey := os.Getenv("SIYUAN_OPENAI_EMBEDDING_API_KEY")
+	embeddingBaseURL := os.Getenv("SIYUAN_OPENAI_EMBEDDING_BASE_URL")
+	embeddingModel := os.Getenv("SIYUAN_OPENAI_EMBEDDING_MODEL")
+	var providers []*OpenAI
+	if "" != embeddingAPIKey && "" != embeddingBaseURL && "" != embeddingModel {
+		providers = append(providers, &OpenAI{
+			APIKey:     embeddingAPIKey,
+			APITimeout: 30,
+			APIBaseURL: embeddingBaseURL,
+			APIModel:   embeddingModel,
+			Type:       "embedding",
+			Enabled:    &[]bool{true}[0],
+		})
 	}
 	if agentTimeout := os.Getenv("SIYUAN_OPENAI_AGENT_TIMEOUT"); "" != agentTimeout {
 		if v, err := strconv.Atoi(agentTimeout); err == nil {
@@ -144,5 +149,53 @@ func NewAI() *AI {
 			openAI.AgentMaxRetries = v
 		}
 	}
-	return &AI{OpenAI: openAI}
+	return &AI{OpenAI: openAI, Providers: providers}
+}
+
+func (p *OpenAI) IsEnabled() bool {
+	return p.Enabled == nil || *p.Enabled
+}
+
+func (ai *AI) HasAnyProvider() bool {
+	if ai.OpenAI != nil && ai.OpenAI.APIKey != "" && ai.OpenAI.IsEnabled() {
+		return true
+	}
+	for _, p := range ai.Providers {
+		if p != nil && p.APIKey != "" && p.IsEnabled() {
+			return true
+		}
+	}
+	return false
+}
+
+func (ai *AI) GetProvider(model string) *OpenAI {
+	if model == "" {
+		if ai.OpenAI != nil && ai.OpenAI.IsEnabled() && ai.OpenAI.APIKey != "" {
+			return ai.OpenAI
+		}
+		for _, p := range ai.Providers {
+			if p != nil && p.IsEnabled() && p.APIKey != "" {
+				return p
+			}
+		}
+		return ai.OpenAI
+	}
+	for _, p := range ai.Providers {
+		if p != nil && p.APIModel == model && p.IsEnabled() && p.APIKey != "" {
+			return p
+		}
+	}
+	return ai.OpenAI
+}
+
+func (ai *AI) GetEmbeddingProvider() *OpenAI {
+	for _, p := range ai.Providers {
+		if p != nil && p.Type == "embedding" {
+			return p
+		}
+	}
+	if ai.OpenAI != nil && ai.OpenAI.Type == "embedding" {
+		return ai.OpenAI
+	}
+	return nil
 }

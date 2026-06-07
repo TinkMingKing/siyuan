@@ -326,7 +326,7 @@ export class Protyle {
                 /// #endif
                 return true;
             } else {
-                onTransaction(this.protyle, item, false);
+                onTransaction(this.protyle, [item], false);
                 // 反链面板移除元素后，文档为空
                 if (!(item.action === "delete" && typeof item.data?.createEmptyParagraph === "boolean" && !item.data.createEmptyParagraph)) {
                     needCreateAction = item.action;
@@ -505,8 +505,17 @@ export class Protyle {
         });
     }
 
+    /**
+     * @deprecated 将在 3.7.1 版本中移除。请改用 {@link updateTransactionElement}。
+     */
     public updateTransaction(id: string, newHTML: string, html: string) {
-        updateTransaction(this.protyle, id, newHTML, html);
+        const element = document.createElement("template");
+        element.innerHTML = newHTML;
+        updateTransaction(this.protyle, element.content.firstElementChild, html);
+    }
+
+    public updateTransactionElement(element: Element, oldHTML: string) {
+        updateTransaction(this.protyle, element, oldHTML);
     }
 
     public updateBatchTransaction(nodeElements: Element[], cb: (e: HTMLElement) => void) {

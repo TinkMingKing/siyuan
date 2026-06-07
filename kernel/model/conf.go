@@ -570,6 +570,10 @@ func InitConf() {
 	if 1 > Conf.AI.OpenAI.APIMaxContexts || 64 < Conf.AI.OpenAI.APIMaxContexts {
 		Conf.AI.OpenAI.APIMaxContexts = 7
 	}
+	if nil == Conf.AI.OpenAI.Enabled && Conf.AI.OpenAI.APIBaseURL != "" && Conf.AI.OpenAI.APIKey != "" {
+		t := true
+		Conf.AI.OpenAI.Enabled = &t
+	}
 
 	if "" != Conf.AI.OpenAI.APIKey {
 		logging.LogInfof("OpenAI API enabled\n"+
@@ -591,12 +595,12 @@ func InitConf() {
 			Conf.AI.OpenAI.APIMaxContexts)
 	}
 
-	if "" != Conf.AI.OpenAI.EmbeddingAPIKey {
+	if embeddingProvider := Conf.AI.GetEmbeddingProvider(); embeddingProvider != nil {
 		logging.LogInfof("embedding API enabled\n"+
 			"    baseURL=%s\n"+
 			"    model=%s",
-			Conf.AI.OpenAI.EmbeddingBaseURL,
-			Conf.AI.OpenAI.EmbeddingModel)
+			embeddingProvider.APIBaseURL,
+			embeddingProvider.APIModel)
 	}
 
 	Conf.ReadOnly = util.ReadOnly

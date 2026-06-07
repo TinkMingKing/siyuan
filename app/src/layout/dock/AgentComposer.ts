@@ -52,6 +52,7 @@ export function mountComposer(host: HTMLElement, onSend: () => void): ComposerHa
 
     const history: string[] = [];
     let historyIdx = -1;
+    let savedDraft = "";
 
     const updateHighlight = () => {
         if (!suggestionMenu) { return; }
@@ -166,7 +167,7 @@ export function mountComposer(host: HTMLElement, onSend: () => void): ComposerHa
                                 if (!suggestionMenu) { return false; }
                                 if (props.event.key === "ArrowDown") {
                                     props.event.preventDefault();
-                                    var items = suggestionMenu.querySelectorAll(".agent-mention-menu__item");
+                                    const items = suggestionMenu.querySelectorAll(".agent-mention-menu__item");
                                     if (items.length > 0) {
                                         selectedIndex = (selectedIndex + 1) % items.length;
                                         updateHighlight();
@@ -175,7 +176,7 @@ export function mountComposer(host: HTMLElement, onSend: () => void): ComposerHa
                                 }
                                 if (props.event.key === "ArrowUp") {
                                     props.event.preventDefault();
-                                    var items = suggestionMenu.querySelectorAll(".agent-mention-menu__item");
+                                    const items = suggestionMenu.querySelectorAll(".agent-mention-menu__item");
                                     if (items.length > 0) {
                                         selectedIndex = (selectedIndex - 1 + items.length) % items.length;
                                         updateHighlight();
@@ -212,12 +213,15 @@ export function mountComposer(host: HTMLElement, onSend: () => void): ComposerHa
                     return true;
                 }
                 if (event.key === "ArrowUp" && !suggestionMenu) {
+                    const navigating = historyIdx >= 0;
                     const isEmpty = _view.state.doc.childCount === 1 &&
                         _view.state.doc.firstChild?.childCount === 0;
-                    if (isEmpty && history.length > 0) {
+                    if ((navigating || isEmpty) && history.length > 0) {
                         event.preventDefault();
-                        if (historyIdx === -1) { historyIdx = history.length - 1; }
-                        else if (historyIdx > 0) { historyIdx--; }
+                        if (historyIdx === -1) {
+                            savedDraft = editor.state.doc.textContent;
+                            historyIdx = history.length - 1;
+                        } else if (historyIdx > 0) { historyIdx--; }
                         if (historyIdx >= 0) {
                             editor.commands.setContent(history[historyIdx]);
                         }
@@ -229,11 +233,16 @@ export function mountComposer(host: HTMLElement, onSend: () => void): ComposerHa
                     historyIdx++;
                     if (historyIdx >= history.length) {
                         historyIdx = -1;
-                        editor.commands.clearContent();
+                        editor.commands.setContent(savedDraft || "");
+                        savedDraft = "";
                     } else {
                         editor.commands.setContent(history[historyIdx]);
                     }
                     return true;
+                }
+                if (historyIdx >= 0 && event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+                    historyIdx = -1;
+                    savedDraft = "";
                 }
                 return false;
             },

@@ -1492,7 +1492,7 @@ export class Gutter {
                         nodeElement.setAttribute("data-sb-layout", "col");
                     }
                     nodeElement.setAttribute("updated", dayjs().format("YYYYMMDDHHmmss"));
-                    updateTransaction(protyle, id, nodeElement.outerHTML, oldHTML);
+                    updateTransaction(protyle, nodeElement, oldHTML);
                     focusByRange(protyle.toolbar.range);
                     hideElements(["gutter"], protyle);
                 }
@@ -1604,7 +1604,7 @@ export class Gutter {
                         element.querySelector("input").addEventListener("change", (event) => {
                             const newHeight = ((event.target as HTMLInputElement).value || "420") + "px";
                             (nodeElement as HTMLElement).style.height = newHeight;
-                            updateTransaction(protyle, id, nodeElement.outerHTML, html);
+                            updateTransaction(protyle, nodeElement, html);
                             html = nodeElement.outerHTML;
                             event.stopPropagation();
                             const renderElement = nodeElement.querySelector('[contenteditable="false"]') as HTMLElement;
@@ -2326,6 +2326,7 @@ export class Gutter {
         const undoOperations: IOperation[] = [];
         const operations: IOperation[] = [];
         nodeElements.forEach((e) => {
+            e.setAttribute(Constants.ATTRIBUTE_EDITING, "true");
             undoOperations.push({
                 action: "update",
                 id: e.getAttribute("data-node-id"),
@@ -2334,6 +2335,7 @@ export class Gutter {
         });
         inputElement.addEventListener(inputElement.type === "number" ? "blur" : "change", () => {
             nodeElements.forEach((e: HTMLElement) => {
+                e.setAttribute(Constants.ATTRIBUTE_EDITING, "true");
                 operations.push({
                     action: "update",
                     id: e.getAttribute("data-node-id"),
