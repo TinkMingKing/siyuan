@@ -37,22 +37,45 @@ export type ISSEResult = {
 } | {
     type: "reasoning";
     token: string;
+} | {
+    type: "snapshot";
+    snapshotID: string;
+} | {
+    type: "frontend_tool_call";
+    callID: string;
+    name: string;
+    arguments: Record<string, unknown>;
+};
+
+export type IEditorContext = {
+    activeDocID?: string;
+    activeDocTitle?: string;
+    notebookID?: string;
+    focusedBlockID?: string;
+    selectedBlockIDs?: string[];
+    visibleBlockIDs?: string[];
 };
 
 export async function fetchAgentSSE(
-    messages: Array<{role: string; content: string}>,
+    message: string,
     language: string,
     references: Array<{id: string; title: string}>,
-    onEvent: (event: ISSEResult) => void,
+    onEvent: (event: ISSEResult) => void | Promise<void>,
     onError: (err: Error) => void,
     signal?: AbortSignal,
     sessionID?: string,
     model?: string,
+    regenerate?: boolean,
+    editorContext?: IEditorContext,
+    pluginActions?: Array<{name: string; description: string}>,
 ): Promise<void> {
     try {
-        const body: Record<string, unknown> = {messages: messages, language: language, references: references};
+        const body: Record<string, unknown> = {message: message, language: language, references: references};
         if (sessionID) { body.sessionID = sessionID; }
         if (model) { body.model = model; }
+        if (regenerate) { body.regenerate = regenerate; }
+        if (editorContext) { body.editorContext = editorContext; }
+        if (pluginActions && pluginActions.length > 0) { body.pluginActions = pluginActions; }
 
         const response = await fetch("/api/ai/agent/chat", {
             method: "POST",
@@ -62,14 +85,13 @@ export async function fetchAgentSSE(
         });
 
         if (!response.ok) {
-            const text = await response.text();
-            onError(new Error("HTTP " + response.status + ": " + (text || response.statusText)));
+            onError(new Error(window.siyuan.languages._kernel[28]));
             return;
         }
 
         const reader = response.body ? response.body.getReader() : null;
         if (!reader) {
-            onError(new Error("Response body is not readable"));
+            onError(new Error(window.siyuan.languages._kernel[28]));
             return;
         }
 
@@ -98,7 +120,7 @@ export async function fetchAgentSSE(
                             const data = JSON.parse(dataStr);
                             const result = buildSSEResult(currentEvent, data);
                             if (result) {
-                                onEvent(result);
+                                await onEvent(result);
                             }
                         } catch (e) {
                             // skip malformed data
@@ -119,7 +141,7 @@ export async function fetchAgentSSE(
                         const data = JSON.parse(dataStr);
                         const result = buildSSEResult(currentEvent, data);
                         if (result) {
-                            onEvent(result);
+                            await onEvent(result);
                         }
                     } catch (e) {
                         // skip malformed data
@@ -130,7 +152,12 @@ export async function fetchAgentSSE(
     } catch (err) {
         const e = err as Error;
         if (e.name !== "AbortError") {
-            onError(e);
+            const msg = e.message.toLowerCase();
+            if (msg.indexOf("timeout") !== -1 || msg.indexOf("deadline") !== -1) {
+                onError(new Error(window.siyuan.languages._kernel[24]));
+            } else {
+                onError(new Error(window.siyuan.languages._kernel[28]));
+            }
         }
     }
 }
@@ -184,6 +211,15 @@ function buildSSEResult(event: string, data: Record<string, unknown>): ISSEResul
             };
         case "reasoning":
             return {type: "reasoning", token: data.token as string};
+        case "snapshot":
+            return {type: "snapshot", snapshotID: data.snapshotID as string};
+        case "frontend_tool_call":
+            return {
+                type: "frontend_tool_call",
+                callID: data.callID as string,
+                name: data.name as string,
+                arguments: (data.arguments || {}) as Record<string, unknown>,
+            };
         default:
             return null;
     }

@@ -1,28 +1,54 @@
 import {fetchSyncPost} from "../../util/fetch";
 
-const SESSIONS_DIR = "data/storage/ai/agent/sessions/";
-const SESSIONS_INDEX = SESSIONS_DIR + "index.json";
+const API = "/api/ai/agent";
 
-interface SessionIndexItem {
+export interface SessionIndexItem {
     id: string;
     title: string;
-    model?: string;
     createdAt: number;
     updatedAt: number;
+}
+
+export interface SessionListResult {
+    sessions: SessionIndexItem[];
+    total: number;
+    page: number;
+    pageSize: number;
 }
 
 export interface AgentSession {
     id: string;
     title: string;
+    titled?: boolean;
     model?: string;
+    messages?: Array<{role: string; content: string; toolCalls?: Array<{name: string; arguments?: Record<string, unknown>; result?: string}>}>;
     entries?: Array<{
-        type: "user" | "thinking" | "assistant";
+        id?: string;
+        type: "user" | "thinking" | "assistant" | "confirm" | "question" | "snapshot" | "rollback";
         content?: string;
-        reasoning?: string;
-        text?: string;
+        // thinking step：新格式只含 reasoning/reasoningContent/toolNames/content；
+        // text/toolCalls 仅为读取老数据而保留为可选（渲染时归一化）。
+        steps?: Array<{
+            reasoning: string;
+            reasoningContent: string;
+            toolNames?: string[];
+            content?: string;
+            text?: string;
+            toolCalls?: Array<{name: string; result?: string}>
+        }>;
         reasoningContent?: string;
         toolCalls?: Array<{name: string; arguments?: Record<string, unknown>; result?: string}>;
+        duration?: number;
+        confirmName?: string;
+        confirmArgs?: Record<string, unknown>;
+        confirmID?: string;
+        confirmStatus?: string;
+        questionID?: string;
+        questions?: Array<Record<string, unknown>>;
+        questionStatus?: string;
+        snapshotID?: string;
     }>;
+    snapshots?: string[];
     promptTokens?: number;
     completionTokens?: number;
     totalDuration?: number;
@@ -35,124 +61,34 @@ function newSessionId(): string {
     return (window as any).Lute ? (window as any).Lute.NewNodeID() : Date.now().toString(36);
 }
 
-async function readJsonFile(path: string): Promise<any | null> {
-    try {
-        const r = await fetchSyncPost("/api/file/getFile", {path: path}) as any;
-        // getFile 返回的是文件内容本身，不是 {code, data} 包装
-        if (!r) { return null; }
-        return r;
-    } catch (e) {
-        return null;
-    }
-}
-
-async function writeJsonFile(path: string, data: any): Promise<void> {
-    const content = JSON.stringify(data, null, 2);
-    const fileName = path.split("/").pop() || "file.json";
-    const file = new File([new Blob([content], {type: "application/json"})], fileName);
-    const formData = new FormData();
-    formData.append("path", path);
-    formData.append("file", file);
-    formData.append("isDir", "false");
-    await fetchSyncPost("/api/file/putFile", formData);
-}
-
-async function ensureDir(): Promise<void> {
-    const idx = await readJsonFile(SESSIONS_INDEX);
-    if (idx && Array.isArray(idx)) { return; }
-
-    try {
-        const r = await fetchSyncPost("/api/file/readDir", {path: SESSIONS_DIR}) as any;
-        if (r && r.code === 0) {
-            await rebuildIndex();
-            return;
-        }
-    } catch (e) {
-        // readDir 失败，继续尝试创建
-    }
-
-    await writeJsonFile(SESSIONS_INDEX, []);
-}
-
-async function rebuildIndex(): Promise<void> {
-    try {
-        const r = await fetchSyncPost("/api/file/readDir", {path: SESSIONS_DIR}) as any;
-        if (!r || r.code !== 0 || !r.data) {
-            await writeJsonFile(SESSIONS_INDEX, []);
-            return;
-        }
-        const entries = r.data as Array<{name: string; updated: number}>;
-        const list: SessionIndexItem[] = [];
-        for (let i = 0; i < entries.length; i++) {
-            const name = entries[i].name;
-            if (name === "index.json" || !name.endsWith(".json")) { continue; }
-            const id = name.replace(".json", "");
-            const session = await readJsonFile(SESSIONS_DIR + name);
-            if (session && session.id && (session.entries || session.messages)) {
-                list.push({
-                    id: id,
-                    title: session.title || "AI Agent",
-                    model: session.model || "",
-                    createdAt: session.createdAt || entries[i].updated || Date.now(),
-                    updatedAt: session.updatedAt || entries[i].updated || Date.now(),
-                });
-            }
-        }
-        await writeJsonFile(SESSIONS_INDEX, list);
-    } catch (e) {
-        console.warn("[SessionStore] rebuildIndex failed:", e);
-        await writeJsonFile(SESSIONS_INDEX, []);
-    }
-}
-
-async function writeIndex(list: SessionIndexItem[]): Promise<void> {
-    await writeJsonFile(SESSIONS_INDEX, list);
-}
-
 export const SessionStore = {
-    async init(): Promise<void> {
-        await ensureDir();
-        const idx = await readJsonFile(SESSIONS_INDEX);
-        if (!idx || !Array.isArray(idx)) {
-            await rebuildIndex();
-        }
+    async init(): Promise<SessionIndexItem[]> {
+        const result = await this.list({page: 1, pageSize: 1});
+        return result.sessions;
     },
 
-    async list(): Promise<SessionIndexItem[]> {
-        const idx = await readJsonFile(SESSIONS_INDEX);
-        return Array.isArray(idx) ? idx : [];
+    async list(opts?: {page?: number, pageSize?: number, keyword?: string}): Promise<SessionListResult> {
+        const resp = await fetchSyncPost(API + "/lsSessions", {
+            page: opts?.page || 1,
+            pageSize: opts?.pageSize || 30,
+            keyword: opts?.keyword || "",
+        }) as {code: number, data: SessionListResult};
+        if (resp && resp.code === 0) { return resp.data; }
+        return {sessions: [], total: 0, page: 1, pageSize: opts?.pageSize || 30};
     },
 
     async load(id: string): Promise<AgentSession | null> {
-        return await readJsonFile(SESSIONS_DIR + id + ".json");
+        const resp = await fetchSyncPost(API + "/getSession", {id}) as {code: number, data: AgentSession};
+        return (resp && resp.code === 0) ? resp.data : null;
     },
 
     async save(session: AgentSession): Promise<void> {
         session.updatedAt = Date.now();
-        await writeJsonFile(SESSIONS_DIR + session.id + ".json", session);
-
-        const list = await this.list();
-        let foundIdx = -1;
-        for (let i = 0; i < list.length; i++) {
-            if (list[i].id === session.id) {
-                list[i].title = session.title;
-                list[i].updatedAt = session.updatedAt;
-                list[i].model = session.model;
-                foundIdx = i;
-                break;
-            }
-        }
-        if (foundIdx < 0) {
-            list.unshift({id: session.id, title: session.title, model: session.model, createdAt: session.createdAt, updatedAt: session.updatedAt});
-        }
-        await writeIndex(list);
+        await fetchSyncPost(API + "/saveSession", session);
     },
 
     async remove(id: string): Promise<void> {
-        await fetchSyncPost("/api/file/removeFile", {path: SESSIONS_DIR + id + ".json"});
-        let list = await this.list();
-        list = list.filter(function (item: any) { return item.id !== id; });
-        await writeIndex(list);
+        await fetchSyncPost(API + "/removeSession", {id});
     },
 
     async rename(id: string, newTitle: string): Promise<void> {
@@ -162,5 +98,5 @@ export const SessionStore = {
         await this.save(session);
     },
 
-    newSessionId: newSessionId,
+    newSessionId,
 };

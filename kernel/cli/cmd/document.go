@@ -79,6 +79,11 @@ var documentCreateCmd = &cobra.Command{
 			dir = "/"
 		}
 
+		if dryRun {
+			fmt.Printf("[dry-run] Would create document \"%s\" in notebook %s\n", title, notebook)
+			return nil
+		}
+
 		id := ast.NewNodeID()
 		docPath := path.Join(dir, id+".sy")
 		_, err := model.CreateDocByMd(notebook, docPath, title, markdown, nil, nil)
@@ -145,6 +150,12 @@ var documentRemoveCmd = &cobra.Command{
 		if id == "" {
 			return fmt.Errorf("--id is required")
 		}
+
+		if dryRun {
+			fmt.Printf("[dry-run] Would remove document %s\n", id)
+			return nil
+		}
+
 		tree, err := model.LoadTreeByBlockID(id)
 		if err != nil {
 			return err
@@ -172,6 +183,12 @@ var documentRenameCmd = &cobra.Command{
 		if title == "" {
 			return fmt.Errorf("--title is required")
 		}
+
+		if dryRun {
+			fmt.Printf("[dry-run] Would rename document %s to \"%s\"\n", id, title)
+			return nil
+		}
+
 		tree, err := model.LoadTreeByBlockID(id)
 		if err != nil {
 			return err
@@ -196,6 +213,12 @@ var documentMoveCmd = &cobra.Command{
 		if id == "" || toNotebook == "" {
 			return fmt.Errorf("--id and --notebook are required")
 		}
+
+		if dryRun {
+			fmt.Printf("[dry-run] Would move document %s to notebook %s\n", id, toNotebook)
+			return nil
+		}
+
 		tree, err := model.LoadTreeByBlockID(id)
 		if err != nil {
 			return err
@@ -217,6 +240,12 @@ var documentDuplicateCmd = &cobra.Command{
 		if id == "" {
 			return fmt.Errorf("--id is required")
 		}
+
+		if dryRun {
+			fmt.Printf("[dry-run] Would duplicate document %s\n", id)
+			return nil
+		}
+
 		tree, err := model.LoadTreeByBlockID(id)
 		if err != nil {
 			return err
@@ -224,6 +253,33 @@ var documentDuplicateCmd = &cobra.Command{
 		model.DuplicateDoc(tree)
 		model.AppendPushReloadFiletreeEntry()
 		fmt.Println(tree.ID)
+		return nil
+	},
+}
+
+var documentInfoCmd = &cobra.Command{
+	Use:   "info --id <id>",
+	Short: "Get document info",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, _ := cmd.Flags().GetString("id")
+		if id == "" {
+			return fmt.Errorf("--id is required")
+		}
+		info, err := model.GetDocInfo(id)
+		if err != nil {
+			return err
+		}
+		switch outputFormat {
+		case "json":
+			data, _ := json.MarshalIndent(info, "", "  ")
+			fmt.Println(string(data))
+		default:
+			fmt.Printf("ID:           %s\n", info.ID)
+			fmt.Printf("RootID:       %s\n", info.RootID)
+			fmt.Printf("Name:         %s\n", info.Name)
+			fmt.Printf("RefCount:     %d\n", info.RefCount)
+			fmt.Printf("SubFileCount: %d\n", info.SubFileCount)
+		}
 		return nil
 	},
 }
@@ -270,6 +326,7 @@ func init() {
 	documentMoveCmd.Flags().String("hpath", "", "target human-readable path")
 
 	documentDuplicateCmd.Flags().String("id", "", "document block ID to duplicate")
+	documentInfoCmd.Flags().String("id", "", "document block ID")
 
 	rootCmd.AddCommand(documentCmd)
 	documentCmd.AddCommand(documentListCmd)
@@ -279,6 +336,7 @@ func init() {
 	documentCmd.AddCommand(documentRenameCmd)
 	documentCmd.AddCommand(documentMoveCmd)
 	documentCmd.AddCommand(documentDuplicateCmd)
+	documentCmd.AddCommand(documentInfoCmd)
 }
 
 

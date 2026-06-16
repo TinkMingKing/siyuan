@@ -7,6 +7,7 @@ import Mention from "@tiptap/extension-mention";
 import {Placeholder} from "@tiptap/extension-placeholder";
 import {History} from "@tiptap/extension-history";
 import {getIconByType} from "../../editor/getIcon";
+import {escapeHtml} from "../../util/escape";
 
 interface BlockHit {
     id: string;
@@ -29,12 +30,6 @@ interface ComposerHandle {
 export function mountComposer(host: HTMLElement, onSend: () => void): ComposerHandle {
     const L = window.siyuan.languages;
 
-    const escapeHtmlHelper = function (text: string): string {
-        const div = document.createElement("div");
-        div.textContent = text;
-        return div.innerHTML;
-    };
-
     let suggestionMenu: HTMLElement | null = null;
     let selectedIndex = 0;
     let suggestionCommand: ((item: BlockHit) => void) | null = null;
@@ -53,6 +48,10 @@ export function mountComposer(host: HTMLElement, onSend: () => void): ComposerHa
     const history: string[] = [];
     let historyIdx = -1;
     let savedDraft = "";
+
+    let slashActive = false;
+    let slashRange: {from: number; to: number} | null = null;
+    let cachedSkills: BlockHit[] | null = null;
 
     const updateHighlight = () => {
         if (!suggestionMenu) { return; }
@@ -74,8 +73,8 @@ export function mountComposer(host: HTMLElement, onSend: () => void): ComposerHa
             row.className = "agent-mention-menu__item";
             row.setAttribute("data-index", i.toString());
             const iconSvg = item.icon ? '<svg class="agent-mention-menu__icon"><use xlink:href="#' + item.icon + '"></use></svg>' : "";
-            const hPathText = item.hPath ? '<div class="agent-mention-menu__hpath">' + escapeHtmlHelper(item.hPath) + "</div>" : "";
-            row.innerHTML = '<div class="agent-mention-menu__first">' + iconSvg + '<span class="agent-mention-menu__text">' + escapeHtmlHelper(item.label) + "</span></div>" + hPathText;
+            const hPathText = item.hPath ? '<div class="agent-mention-menu__hpath">' + escapeHtml(item.hPath) + "</div>" : "";
+            row.innerHTML = '<div class="agent-mention-menu__first">' + iconSvg + '<span class="agent-mention-menu__text">' + escapeHtml(item.label) + "</span></div>" + hPathText;
             row.addEventListener("mousedown", function (hit: BlockHit) {
                 return function (e: MouseEvent) { e.preventDefault(); command(hit); };
             }(item));
@@ -90,10 +89,14 @@ export function mountComposer(host: HTMLElement, onSend: () => void): ComposerHa
         if (clientRect) {
             const rect = clientRect();
             let top = rect.top + rect.height + 4;
-            const left = rect.left;
+            let left = rect.left;
             const menuHeight = suggestionMenu.offsetHeight;
             if (top + menuHeight > window.innerHeight && rect.top > menuHeight + 4) {
                 top = rect.top - menuHeight - 4;
+            }
+            const menuWidth = suggestionMenu.offsetWidth;
+            if (left + menuWidth > window.innerWidth) {
+                left = window.innerWidth - menuWidth - 8;
             }
             suggestionMenu.style.top = top + "px";
             suggestionMenu.style.left = left + "px";
@@ -119,6 +122,8 @@ export function mountComposer(host: HTMLElement, onSend: () => void): ComposerHa
                 },
                 suggestion: {
                     char: "@",
+                    allowToIncludeChar: true,
+                    allowedPrefixes: null,
                     items: async function ({query}): Promise<BlockHit[]> {
                         try {
                             const resp = await fetch("/api/search/searchRefBlock", {
@@ -207,6 +212,44 @@ export function mountComposer(host: HTMLElement, onSend: () => void): ComposerHa
         editorProps: {
             attributes: {class: "agent-composer__pm"},
             handleKeyDown: function (_view, event) {
+                if (suggestionMenu && slashActive) {
+                    if (event.key === "ArrowDown") {
+                        event.preventDefault();
+                        const items = suggestionMenu.querySelectorAll(".agent-mention-menu__item");
+                        if (items.length > 0) {
+                            selectedIndex = (selectedIndex + 1) % items.length;
+                            updateHighlight();
+                        }
+                        return true;
+                    }
+                    if (event.key === "ArrowUp") {
+                        event.preventDefault();
+                        const items = suggestionMenu.querySelectorAll(".agent-mention-menu__item");
+                        if (items.length > 0) {
+                            selectedIndex = (selectedIndex - 1 + items.length) % items.length;
+                            updateHighlight();
+                        }
+                        return true;
+                    }
+                    if (event.key === "Enter") {
+                        event.preventDefault();
+                        if (suggestionItems.length > 0 && suggestionCommand) {
+                            const idx = selectedIndex;
+                            if (idx >= 0 && idx < suggestionItems.length) {
+                                suggestionCommand(suggestionItems[idx]);
+                            }
+                        }
+                        return true;
+                    }
+                    if (event.key === "Escape") {
+                        event.preventDefault();
+                        closeMenu();
+                        slashActive = false;
+                        slashRange = null;
+                        return true;
+                    }
+                    return false;
+                }
                 if (event.key === "Enter" && !event.shiftKey && !suggestionMenu) {
                     event.preventDefault();
                     onSend();
@@ -247,6 +290,73 @@ export function mountComposer(host: HTMLElement, onSend: () => void): ComposerHa
                 return false;
             },
         },
+    });
+
+    editor.on("update", function () {
+        if (suggestionMenu && !slashActive) { return; }
+        const {$from} = editor.state.selection;
+        const textBefore = $from.parent.textBetween(0, $from.parentOffset);
+        const match = textBefore.match(/(?:^|\s)\/(\S*)$/);
+        if (match) {
+            const query = match[1];
+            const slashPos = $from.pos - query.length - 1;
+            slashActive = true;
+            slashRange = {from: slashPos, to: $from.pos};
+            const slashCoords = editor.view.coordsAtPos($from.pos);
+            const slashClientRect = function () {
+                return {
+                    left: slashCoords.left,
+                    top: slashCoords.top,
+                    right: slashCoords.right,
+                    bottom: slashCoords.bottom,
+                    width: slashCoords.right - slashCoords.left,
+                    height: slashCoords.bottom - slashCoords.top,
+                } as DOMRect;
+            };
+
+            const filterAndOpen = function (skills: BlockHit[]) {
+                const q = query.toLowerCase();
+                const filtered = !q ? skills : skills.filter(function (s) {
+                    return s.label.toLowerCase().includes(q) || s.hPath.toLowerCase().includes(q);
+                });
+                suggestionCommand = function (item: BlockHit) {
+                    editor.chain().focus().deleteRange({from: slashRange!.from, to: slashRange!.to}).insertContent(item.label + " ").run();
+                    closeMenu();
+                    slashActive = false;
+                    slashRange = null;
+                };
+                openMenu(filtered, suggestionCommand!, slashClientRect);
+                cachedSkills = skills;
+            };
+
+            if (cachedSkills) {
+                filterAndOpen(cachedSkills);
+            } else {
+                fetch("/api/ai/agent/lsSkills", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                }).then(function (r) { return r.json(); }).then(function (data) {
+                    const rawSkills = (data && data.data) ? data.data : [];
+                    const items: BlockHit[] = rawSkills.map(function (s: Record<string, string>) {
+                        return {
+                            id: s.name,
+                            label: s.name,
+                            icon: "",
+                            hPath: s.description || "",
+                        };
+                    });
+                    filterAndOpen(items);
+                }).catch(function () {
+                    closeMenu();
+                    slashActive = false;
+                    slashRange = null;
+                });
+            }
+        } else if (slashActive) {
+            closeMenu();
+            slashActive = false;
+            slashRange = null;
+        }
     });
 
     return {

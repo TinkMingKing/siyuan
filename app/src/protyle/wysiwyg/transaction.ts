@@ -62,226 +62,213 @@ const removeTopElement = (updateElement: Element, protyle: IProtyle) => {
 };
 
 // 用于执行操作，外加处理当前编辑器中块引用、嵌入块的更新
-const promiseTransaction = () => {
-    if (window.siyuan.transactions.length === 0) {
-        return;
+const promiseTransaction = (options: {
+    protyle: IProtyle,
+    doOperations: IOperation[],
+    undoOperations: IOperation[],
+    skipSync: boolean
+}) => {
+    const protyle = options.protyle;
+    /// #if MOBILE
+    if (((0 !== window.siyuan.config.sync.provider && isPaidUser()) ||
+            (0 === window.siyuan.config.sync.provider && !needSubscribe(""))) &&
+        window.siyuan.config.repo.key && window.siyuan.config.sync.enabled) {
+        document.getElementById("toolbarSync").classList.remove("fn__none");
     }
-    const protyle = window.siyuan.transactions[0].protyle;
-    const doOperations = window.siyuan.transactions[0].doOperations;
-    const undoOperations = window.siyuan.transactions[0].undoOperations;
-    const skipSync = window.siyuan.transactions[0].skipSync;
-    // 1. * ;2. * ;3. a
-    // 第一步请求没有返回前在 transaction 中会合并1、2步，此时第一步请求返回将被以下代码删除，在输入a时，就会出现 block not found，因此以下代码不能放入请求回调中
-    window.siyuan.transactions.splice(0, 1);
-    fetchPost("/api/transactions", {
-        session: protyle.id,
-        app: Constants.SIYUAN_APPID,
-        transactions: [{
-            doOperations,
-            undoOperations // 目前用于 ws 推送更新大纲
-        }]
-    }, (response) => {
-        if (window.siyuan.transactions.length === 0) {
-            const ids: string[] = [];
-            protyle.wysiwyg.element.querySelectorAll(".protyle-wysiwyg--select").forEach(item => {
-                ids.push(item.getAttribute("data-node-id"));
-            });
-            countBlockWord(ids, protyle.block.rootID, true);
-        } else {
-            promiseTransaction();
-        }
-        /// #if MOBILE
-        if (((0 !== window.siyuan.config.sync.provider && isPaidUser()) ||
-                (0 === window.siyuan.config.sync.provider && !needSubscribe(""))) &&
-            window.siyuan.config.repo.key && window.siyuan.config.sync.enabled) {
-            document.getElementById("toolbarSync").classList.remove("fn__none");
-        }
-        /// #endif
-        let range: Range;
-        if (getSelection().rangeCount > 0) {
-            range = getSelection().getRangeAt(0);
-        }
-        if (!skipSync) {
-            response.data[0].doOperations.forEach((operation: IOperation) => {
-                if (operation.action === "unfoldHeading" || operation.action === "foldHeading") {
-                    processFold(operation, protyle);
-                    return;
-                }
-                if (operation.action === "update") {
-                    // 当前编辑器中的其他块
-                    let updatedEmbed = false;
+    /// #endif
+    let range: Range;
+    if (getSelection().rangeCount > 0) {
+        range = getSelection().getRangeAt(0);
+    }
+    if (!options.skipSync) {
+        options.doOperations.forEach((operation: IOperation) => {
+            if (operation.action === "update") {
+                // 当前编辑器中的其他块
+                let updatedEmbed = false;
 
-                    const updateHTML = (item: Element, html: string) => {
-                        if (item.getAttribute(Constants.ATTRIBUTE_EDITING) === "true") {
-                            item.removeAttribute(Constants.ATTRIBUTE_EDITING);
-                            return;
-                        }
-                        const tempElement = document.createElement("template");
-                        tempElement.innerHTML = html;
-                        tempElement.content.querySelectorAll(".protyle-wysiwyg--select").forEach(selectItem => {
-                            selectItem.classList.remove("protyle-wysiwyg--select");
-                        });
-                        const wbrElement = tempElement.content.querySelector("wbr");
-                        if (wbrElement) {
-                            wbrElement.remove();
-                        }
-                        item.outerHTML = tempElement.innerHTML;
-                        updatedEmbed = true;
-                    };
+                const updateHTML = (item: Element, html: string) => {
+                    if (item.getAttribute(Constants.ATTRIBUTE_EDITING) === "true") {
+                        item.removeAttribute(Constants.ATTRIBUTE_EDITING);
+                        return;
+                    }
+                    const tempElement = document.createElement("template");
+                    tempElement.innerHTML = html;
+                    tempElement.content.querySelectorAll(".protyle-wysiwyg--select").forEach(selectItem => {
+                        selectItem.classList.remove("protyle-wysiwyg--select");
+                    });
+                    const wbrElement = tempElement.content.querySelector("wbr");
+                    if (wbrElement) {
+                        wbrElement.remove();
+                    }
+                    item.outerHTML = tempElement.innerHTML;
+                    updatedEmbed = true;
+                };
 
-                    const allTempElement = document.createElement("template");
-                    allTempElement.innerHTML = operation.data;
-                    protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${operation.id}"]`).forEach((item) => {
-                        if (range && (item === range.startContainer || item.contains(range.startContainer))) {
-                            // 正在编辑的块不能进行更新
-                        } else {
-                            updateHTML(item, operation.data);
-                        }
-                    });
-                    protyle.wysiwyg.element.querySelectorAll(".protyle-wysiwyg__embed").forEach(item => {
-                        if (range && (item === range.startContainer || item.contains(range.startContainer))) {
-                            // 正在编辑的块不能进行更新
-                        } else {
-                            // https://github.com/siyuan-note/siyuan/issues/14495
-                            const newTempElement = allTempElement.content.querySelector(`[data-node-id="${item.getAttribute("data-id")}"]`);
-                            if (newTempElement && !isInEmbedBlock(newTempElement)) {
-                                updateHTML(item.querySelector("[data-node-id]"), newTempElement.outerHTML);
-                            }
-                        }
-                    });
-                    if (updatedEmbed) {
-                        processRender(protyle.wysiwyg.element);
-                        highlightRender(protyle.wysiwyg.element);
-                        avRender(protyle.wysiwyg.element, protyle);
-                    }
-                    return;
-                }
-                if (operation.action === "delete" || operation.action === "append") {
-                    if (protyle.options.backlinkData) {
-                        Array.from(protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${operation.id}"]`)).forEach(item => {
-                            if (!isInEmbedBlock(item) && !item.contains(range.startContainer)) {
-                                item.remove();
-                            }
-                        });
-                    }
-                    // 更新嵌入块
-                    protyle.wysiwyg.element.querySelectorAll('[data-type="NodeBlockQueryEmbed"]').forEach((item) => {
-                        if (item.querySelector(`[data-node-id="${operation.id}"]`)) {
-                            item.removeAttribute("data-render");
-                            blockRender(protyle, item);
-                        }
-                    });
-                    hideElements(["gutter"], protyle);
-                    return;
-                }
-                if (operation.action === "move") {
-                    if (protyle.options.backlinkData) {
-                        const updateElements: Element[] = [];
-                        Array.from(protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${operation.id}"]`)).forEach(item => {
-                            if (!isInEmbedBlock(item)) {
-                                const topElement = hasTopClosestByAttribute(item, "data-node-id", null);
-                                if (topElement && !topElement.contains(range.startContainer)) {
-                                    // 当前操作块不再进行操作，否则光标丢失 https://github.com/siyuan-note/siyuan/issues/13946
-                                    updateElements.push(item);
-                                }
-                            }
-                        });
-                        let hasFind = false;
-                        if (operation.previousID && updateElements.length > 0) {
-                            Array.from(protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${operation.previousID}"]`)).forEach(item => {
-                                if (!isInEmbedBlock(item) && !item.nextElementSibling.contains(range.startContainer)) {
-                                    item.after(processClonePHElement(updateElements[0].cloneNode(true) as Element));
-                                    hasFind = true;
-                                }
-                            });
-                        } else if (updateElements.length > 0) {
-                            Array.from(protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${operation.parentID}"]`)).forEach(item => {
-                                if (!isInEmbedBlock(item) && !getFirstBlock(item).contains(range.startContainer)) {
-                                    const cloneElement = processClonePHElement(updateElements[0].cloneNode(true) as Element);
-                                    // 列表特殊处理
-                                    if (item.firstElementChild?.classList.contains("protyle-action")) {
-                                        item.firstElementChild.after(cloneElement);
-                                    } else if (item.classList.contains("callout")) {
-                                        item.querySelector(".callout-content").prepend(cloneElement);
-                                    } else {
-                                        item.prepend(cloneElement);
-                                    }
-                                    hasFind = true;
-                                }
-                            });
-                        }
-                        updateElements.forEach(item => {
-                            if (hasFind) {
-                                item.remove();
-                            } else if (!hasFind && item.parentElement) {
-                                removeTopElement(item, protyle);
-                            }
-                        });
-                    }
-                    // 更新嵌入块
-                    protyle.wysiwyg.element.querySelectorAll('[data-type="NodeBlockQueryEmbed"]').forEach((item) => {
-                        if (item.querySelector(`[data-node-id="${operation.id}"],[data-node-id="${operation.parentID}"],[data-node-id="${operation.previousID}"]`)) {
-                            item.removeAttribute("data-render");
-                            blockRender(protyle, item);
-                        }
-                    });
-                    return;
-                }
-                if (operation.action === "insert") {
-                    const cursorElements: Element[] = [];
-                    if (operation.previousID) {
-                        Array.from(protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${operation.previousID}"]`)).forEach(item => {
-                            if (item.nextElementSibling?.getAttribute("data-node-id") !== operation.id &&
-                                !item.contains(range.startContainer) && // 当前操作块不再进行操作
-                                // 段落转列表会在段落后插入新列表
-                                !hasClosestByAttribute(item, "data-node-id", operation.id) &&
-                                // 嵌入块后不能插入
-                                !item.parentElement.classList.contains("protyle-wysiwyg__embed")) {
-                                item.insertAdjacentHTML("afterend", operation.data);
-                                cursorElements.push(item.nextElementSibling);
-                            }
-                        });
+                const allTempElement = document.createElement("template");
+                allTempElement.innerHTML = operation.data;
+                protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${operation.id}"]`).forEach((item) => {
+                    if (range && (item === range.startContainer || item.contains(range.startContainer))) {
+                        // 正在编辑的块不能进行更新
                     } else {
+                        updateHTML(item, operation.data);
+                    }
+                });
+                protyle.wysiwyg.element.querySelectorAll(".protyle-wysiwyg__embed").forEach(item => {
+                    if (range && (item === range.startContainer || item.contains(range.startContainer))) {
+                        // 正在编辑的块不能进行更新
+                    } else {
+                        // https://github.com/siyuan-note/siyuan/issues/14495
+                        const newTempElement = allTempElement.content.querySelector(`[data-node-id="${item.getAttribute("data-id")}"]`);
+                        if (newTempElement && !isInEmbedBlock(newTempElement)) {
+                            updateHTML(item.querySelector("[data-node-id]"), newTempElement.outerHTML);
+                        }
+                    }
+                });
+                if (updatedEmbed) {
+                    processRender(protyle.wysiwyg.element);
+                    highlightRender(protyle.wysiwyg.element);
+                    avRender(protyle.wysiwyg.element, protyle);
+                }
+                return;
+            }
+            if (operation.action === "delete" || operation.action === "append") {
+                if (protyle.options.backlinkData) {
+                    Array.from(protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${operation.id}"]`)).forEach(item => {
+                        if (!isInEmbedBlock(item) && !item.contains(range.startContainer)) {
+                            item.remove();
+                        }
+                    });
+                }
+                // 更新嵌入块
+                protyle.wysiwyg.element.querySelectorAll('[data-type="NodeBlockQueryEmbed"]').forEach((item) => {
+                    if (item.querySelector(`[data-node-id="${operation.id}"]`)) {
+                        item.removeAttribute("data-render");
+                        blockRender(protyle, item);
+                    }
+                });
+                hideElements(["gutter"], protyle);
+                return;
+            }
+            if (operation.action === "move") {
+                if (protyle.options.backlinkData) {
+                    const updateElements: Element[] = [];
+                    Array.from(protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${operation.id}"]`)).forEach(item => {
+                        if (!isInEmbedBlock(item)) {
+                            const topElement = hasTopClosestByAttribute(item, "data-node-id", null);
+                            if (topElement && !topElement.contains(range.startContainer)) {
+                                // 当前操作块不再进行操作，否则光标丢失 https://github.com/siyuan-note/siyuan/issues/13946
+                                updateElements.push(item);
+                            }
+                        }
+                    });
+                    let hasFind = false;
+                    if (operation.previousID && updateElements.length > 0) {
+                        Array.from(protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${operation.previousID}"]`)).forEach(item => {
+                            if (!isInEmbedBlock(item) && !item.nextElementSibling.contains(range.startContainer)) {
+                                item.after(processClonePHElement(updateElements[0].cloneNode(true) as Element));
+                                hasFind = true;
+                            }
+                        });
+                    } else if (updateElements.length > 0) {
                         Array.from(protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${operation.parentID}"]`)).forEach(item => {
-                            if (!isInEmbedBlock(item) && !item.contains(range.startContainer)) {
+                            if (!isInEmbedBlock(item) && !getFirstBlock(item).contains(range.startContainer)) {
+                                const cloneElement = processClonePHElement(updateElements[0].cloneNode(true) as Element);
                                 // 列表特殊处理
-                                if (item.firstElementChild && item.firstElementChild.classList.contains("protyle-action") &&
-                                    item.firstElementChild.nextElementSibling?.getAttribute("data-node-id") !== operation.id) {
-                                    item.firstElementChild.insertAdjacentHTML("afterend", operation.data);
-                                    cursorElements.push(item.firstElementChild.nextElementSibling);
-                                } else if (item.classList.contains("callout") &&
-                                    item.querySelector("[data-node-id]")?.getAttribute("data-node-id") !== operation.id) {
-                                    item.querySelector(".callout-content").insertAdjacentHTML("afterbegin", operation.data);
-                                    cursorElements.push(item.querySelector("[data-node-id]"));
-                                } else if (item.firstElementChild.getAttribute("data-node-id") !== operation.id) {
-                                    item.insertAdjacentHTML("afterbegin", operation.data);
-                                    cursorElements.push(item.firstElementChild);
+                                if (item.firstElementChild?.classList.contains("protyle-action")) {
+                                    item.firstElementChild.after(cloneElement);
+                                } else if (item.classList.contains("callout")) {
+                                    item.querySelector(".callout-content").prepend(cloneElement);
+                                } else {
+                                    item.prepend(cloneElement);
                                 }
+                                hasFind = true;
                             }
                         });
                     }
-                    // https://github.com/siyuan-note/siyuan/issues/4420
-                    protyle.wysiwyg.element.querySelectorAll('[data-type="NodeHeading"]').forEach(item => {
-                        if (item.lastElementChild.getAttribute("spin") === "1") {
-                            item.lastElementChild.remove();
+                    updateElements.forEach(item => {
+                        if (hasFind) {
+                            item.remove();
+                        } else if (!hasFind && item.parentElement) {
+                            removeTopElement(item, protyle);
                         }
                     });
-                    cursorElements.forEach(item => {
-                        processRender(item);
-                        highlightRender(item);
-                        avRender(item, protyle);
+                }
+                // 更新嵌入块
+                protyle.wysiwyg.element.querySelectorAll('[data-type="NodeBlockQueryEmbed"]').forEach((item) => {
+                    if (item.querySelector(`[data-node-id="${operation.id}"],[data-node-id="${operation.parentID}"],[data-node-id="${operation.previousID}"]`)) {
+                        item.removeAttribute("data-render");
                         blockRender(protyle, item);
-                        item.querySelectorAll("wbr").forEach(wbrItem => {
-                            wbrItem.remove();
-                        });
+                    }
+                });
+                return;
+            }
+            if (operation.action === "insert") {
+                const cursorElements: Element[] = [];
+                if (operation.previousID) {
+                    Array.from(protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${operation.previousID}"]`)).forEach(item => {
+                        if (item.nextElementSibling?.getAttribute("data-node-id") !== operation.id &&
+                            !item.contains(range.startContainer) && // 当前操作块不再进行操作
+                            // 段落转列表会在段落后插入新列表
+                            !hasClosestByAttribute(item, "data-node-id", operation.id) &&
+                            // 嵌入块后不能插入
+                            !item.parentElement.classList.contains("protyle-wysiwyg__embed")) {
+                            item.insertAdjacentHTML("afterend", operation.data);
+                            cursorElements.push(item.nextElementSibling);
+                        }
                     });
-                    protyle.wysiwyg.element.querySelectorAll("[parent-heading]").forEach(item => {
-                        item.remove();
+                } else {
+                    Array.from(protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${operation.parentID}"]`)).forEach(item => {
+                        if (!isInEmbedBlock(item) && !item.contains(range.startContainer)) {
+                            // 列表特殊处理
+                            if (item.firstElementChild && item.firstElementChild.classList.contains("protyle-action") &&
+                                item.firstElementChild.nextElementSibling?.getAttribute("data-node-id") !== operation.id) {
+                                item.firstElementChild.insertAdjacentHTML("afterend", operation.data);
+                                cursorElements.push(item.firstElementChild.nextElementSibling);
+                            } else if (item.classList.contains("callout") &&
+                                item.querySelector("[data-node-id]")?.getAttribute("data-node-id") !== operation.id) {
+                                item.querySelector(".callout-content").insertAdjacentHTML("afterbegin", operation.data);
+                                cursorElements.push(item.querySelector("[data-node-id]"));
+                            } else if (item.firstElementChild.getAttribute("data-node-id") !== operation.id) {
+                                item.insertAdjacentHTML("afterbegin", operation.data);
+                                cursorElements.push(item.firstElementChild);
+                            }
+                        }
                     });
                 }
-            });
-        }
-
+                // https://github.com/siyuan-note/siyuan/issues/4420
+                protyle.wysiwyg.element.querySelectorAll('[data-type="NodeHeading"]').forEach(item => {
+                    if (item.lastElementChild.getAttribute("spin") === "1") {
+                        item.lastElementChild.remove();
+                    }
+                });
+                cursorElements.forEach(item => {
+                    processRender(item);
+                    highlightRender(item);
+                    avRender(item, protyle);
+                    blockRender(protyle, item);
+                    item.querySelectorAll("wbr").forEach(wbrItem => {
+                        wbrItem.remove();
+                    });
+                });
+                protyle.wysiwyg.element.querySelectorAll("[parent-heading]").forEach(item => {
+                    item.remove();
+                });
+                return;
+            }
+            if (operation.action === "setAttrs") {
+                const gutterFoldElement = protyle.gutter.element.querySelector('[data-type="fold"]');
+                if (gutterFoldElement) {
+                    gutterFoldElement.removeAttribute("disabled");
+                }
+                // 仅在 alt+click 箭头折叠时才会触发
+                protyle.wysiwyg.element.querySelectorAll('[data-type="NodeBlockQueryEmbed"]').forEach((item) => {
+                    if (item.querySelector(`[data-node-id="${operation.id}"]`)) {
+                        item.removeAttribute("data-render");
+                        blockRender(protyle, item);
+                    }
+                });
+            }
+        });
         // 删除仅有的折叠标题后展开内容为空
         if (protyle.wysiwyg.element.childElementCount === 0 &&
             // 聚焦时不需要新增块，否则会导致 https://github.com/siyuan-note/siyuan/issues/12326 第一点
@@ -297,6 +284,28 @@ const promiseTransaction = () => {
             }]);
             // 不能撤销，否则就无限循环了
             focusByWbr(emptyElement, range);
+        }
+    }
+    fetchPost("/api/transactions", {
+        session: protyle.id,
+        app: Constants.SIYUAN_APPID,
+        transactions: [{
+            doOperations: options.doOperations,
+            undoOperations: options.undoOperations,// 目前用于 ws 推送更新大纲
+        }]
+    }, (response) => {
+        const ids: string[] = [];
+        protyle.wysiwyg.element.querySelectorAll(".protyle-wysiwyg--select").forEach(item => {
+            ids.push(item.getAttribute("data-node-id"));
+        });
+        countBlockWord(ids, protyle.block.rootID, true);
+        if (!options.skipSync) {
+            response.data[0].doOperations.forEach((operation: IOperation) => {
+                if (operation.action === "unfoldHeading" || operation.action === "foldHeading") {
+                    processFold(operation, protyle);
+                    return;
+                }
+            });
         }
     });
 };
@@ -327,38 +336,33 @@ const deleteBlock = (updateElements: Element[], id: string, protyle: IProtyle, i
 };
 
 const updateBlock = (updateElements: Element[], protyle: IProtyle, operation: IOperation, isUndo: boolean) => {
+    const range = getSelection().rangeCount > 0 ? getSelection().getRangeAt(0) : null;
     updateElements.forEach(item => {
-        // 图标撤销后无法渲染
-        if (item.getAttribute("data-subtype") === "echarts") {
-            item.outerHTML = protyle.lute.SpinBlockDOM(operation.data);
-        } else {
-            item.outerHTML = operation.data;
+        let isRangeBlock = false;
+        if (range && item.contains(range.startContainer)) {
+            isRangeBlock = true;
         }
-    });
-    Array.from(protyle.wysiwyg.element.querySelectorAll(`[data-node-id="${operation.id}"]`)).find(item => {
-        if (!isInEmbedBlock(item)) {
-            if (item.getAttribute("data-type") === "NodeBlockQueryEmbed") {
-                item.removeAttribute("data-render");
+        item.insertAdjacentHTML("afterend",
+            // 图标撤销后无法渲染
+            item.getAttribute("data-subtype") === "echarts" ? protyle.lute.SpinBlockDOM(operation.data) : operation.data);
+        item = item.nextElementSibling;
+        item.previousElementSibling.remove();
+
+        const wbrElement = item.querySelector("wbr");
+        if (isRangeBlock && isUndo) {
+            if (wbrElement) {
+                focusByWbr(item, range);
+            } else {
+                focusBlock(item);
             }
-            updateElements[0] = item;
-            return true;
         }
+        wbrElement?.remove();
+
+        processRender(item);
+        highlightRender(item);
+        avRender(item, protyle);
+        blockRender(protyle, item);
     });
-    const wbrElement = updateElements[0].querySelector("wbr");
-    if (isUndo) {
-        const range = getEditorRange(updateElements[0]);
-        if (wbrElement) {
-            focusByWbr(updateElements[0], range);
-        } else {
-            focusBlock(updateElements[0]);
-        }
-    } else if (wbrElement) {
-        wbrElement.remove();
-    }
-    processRender(updateElements.length === 1 ? updateElements[0] : protyle.wysiwyg.element);
-    highlightRender(updateElements.length === 1 ? updateElements[0] : protyle.wysiwyg.element);
-    avRender(updateElements.length === 1 ? updateElements[0] : protyle.wysiwyg.element, protyle);
-    blockRender(protyle, updateElements.length === 1 ? updateElements[0] : protyle.wysiwyg.element);
 };
 
 // 用于推送和撤销
@@ -1168,6 +1172,7 @@ export const turnsIntoTransaction = (options: {
                 } else {
                     previousId = undefined;
                 }
+                item.outerHTML = newHTML;
             } else {
                 let foldData;
                 if (item.getAttribute("data-type") === "NodeHeading" && item.getAttribute("fold") === "1" &&
@@ -1178,7 +1183,6 @@ export const turnsIntoTransaction = (options: {
                 if (foldData && foldData.doOperations?.length > 0) {
                     doOperations.push(...foldData.doOperations);
                 }
-                item.setAttribute(Constants.ATTRIBUTE_EDITING, "true");
                 undoOperations.push({
                     action: "update",
                     id,
@@ -1192,8 +1196,11 @@ export const turnsIntoTransaction = (options: {
                 if (foldData && foldData.undoOperations?.length > 0) {
                     undoOperations.push(...foldData.undoOperations);
                 }
+                item.insertAdjacentHTML("afterend", newHTML);
+                item = item.nextElementSibling as HTMLElement;
+                item.previousElementSibling.remove();
+                item.setAttribute(Constants.ATTRIBUTE_EDITING, "true");
             }
-            item.outerHTML = newHTML;
         } else {
             undoOperations.push({
                 action: "insert",
@@ -1342,7 +1349,6 @@ export const turnsOneInto = async (options: {
     avRender(options.protyle.wysiwyg.element, options.protyle);
 };
 
-let transactionsTimeout: number;
 export const transaction = (protyle: IProtyle, doOperations: IOperation[], undoOperations?: IOperation[],
                             options?: {
                                 skipSync?: boolean
@@ -1361,81 +1367,19 @@ export const transaction = (protyle: IProtyle, doOperations: IOperation[], undoO
         });
         return;
     }
-
-    const lastTransaction = window.siyuan.transactions[window.siyuan.transactions.length - 1];
-    let needDebounce = false;
-    const time = Date.now();
-    if (lastTransaction && lastTransaction.doOperations.length === 1 && lastTransaction.doOperations[0].action === "update" &&
-        doOperations.length === 1 && doOperations[0].action === "update" &&
-        lastTransaction.doOperations[0].id === doOperations[0].id &&
-        protyle.transactionTime - time < Constants.TIMEOUT_INPUT) {
-        needDebounce = true;
-    }
     if (undoOperations) {
         if (window.siyuan.config.fileTree.openFilesUseCurrentTab && protyle.model) {
             protyle.model.headElement.classList.remove("item--unupdate");
         }
         protyle.updated = true;
-        if (needDebounce) {
-            protyle.undo.replace(doOperations, protyle);
-        } else {
-            protyle.undo.add(doOperations, undoOperations, protyle);
-        }
+        protyle.undo.add(doOperations, undoOperations, protyle);
     }
-    // 加速折叠 https://github.com/siyuan-note/siyuan/issues/11828
-    if ((doOperations.length === 1 && (
-        doOperations[0].action === "unfoldHeading" || doOperations[0].action === "setAttrViewBlockView" ||
-        (doOperations[0].action === "setAttrs" && doOperations[0].data.startsWith('{"fold":'))
-    )) || (doOperations.length === 2 && doOperations[0].action === "insertAttrViewBlock")) {
-        // 防止 needDebounce 为 true
-        protyle.transactionTime = time + Constants.TIMEOUT_INPUT * 2;
-        fetchPost("/api/transactions", {
-            session: protyle.id,
-            app: Constants.SIYUAN_APPID,
-            transactions: [{
-                doOperations,
-                undoOperations
-            }]
-        }, (response) => {
-            response.data[0].doOperations.forEach((operation: IOperation) => {
-                if (operation.action === "unfoldHeading" || operation.action === "foldHeading") {
-                    processFold(operation, protyle);
-                } else if (operation.action === "setAttrs") {
-                    const gutterFoldElement = protyle.gutter.element.querySelector('[data-type="fold"]');
-                    if (gutterFoldElement) {
-                        gutterFoldElement.removeAttribute("disabled");
-                    }
-                    // 仅在 alt+click 箭头折叠时才会触发
-                    protyle.wysiwyg.element.querySelectorAll('[data-type="NodeBlockQueryEmbed"]').forEach((item) => {
-                        if (item.querySelector(`[data-node-id="${operation.id}"]`)) {
-                            item.removeAttribute("data-render");
-                            blockRender(protyle, item);
-                        }
-                    });
-                }
-            });
-        });
-        return;
-    }
-    window.clearTimeout(transactionsTimeout);
-    if (needDebounce) {
-        // 不能覆盖 undoOperations https://github.com/siyuan-note/siyuan/issues/3727
-        window.siyuan.transactions[window.siyuan.transactions.length - 1].protyle = protyle;
-        window.siyuan.transactions[window.siyuan.transactions.length - 1].doOperations = doOperations;
-        window.siyuan.transactions[window.siyuan.transactions.length - 1].skipSync = options?.skipSync;
-    } else {
-        window.siyuan.transactions.push({
-            protyle,
-            doOperations,
-            undoOperations,
-            skipSync: options?.skipSync
-        });
-    }
-    protyle.transactionTime = time;
-    transactionsTimeout = window.setTimeout(() => {
-        promiseTransaction();
-    }, Constants.TIMEOUT_INPUT * 2);
-
+    promiseTransaction({
+        protyle: protyle,
+        doOperations: doOperations,
+        undoOperations: undoOperations,
+        skipSync: options?.skipSync,
+    });
     // 插入块后会导致高度变化，从而产生再次定位 https://github.com/siyuan-note/siyuan/issues/11798
     doOperations.find(item => {
         if (item.action === "insert") {

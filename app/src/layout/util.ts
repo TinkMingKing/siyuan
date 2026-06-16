@@ -1,7 +1,7 @@
 import {Layout} from "./index";
 import {Wnd} from "./Wnd";
 import {Tab} from "./Tab";
-import {Model} from "./Model";
+import type {Model} from "./Model";
 import {Graph} from "./dock/Graph";
 import {Editor} from "../editor";
 import {Files} from "./dock/Files";
@@ -27,10 +27,10 @@ import {Custom} from "./dock/Custom";
 import {newCardModel} from "../card/newCardTab";
 import {App} from "../index";
 import {afterLoadPlugin} from "../plugin/loader";
-import {setTitle} from "../dialog/processSystem";
 import {newCenterEmptyTab, resizeTabs, setTabPosition} from "./tabUtil";
 import {setStorageVal} from "../protyle/util/compatibility";
 import {adjustDockPadding} from "./dock/util";
+import {setTitle} from "../util/processTitle";
 
 export const setPanelFocus = (element: Element, isSaveLayout = true) => {
     if (element.getAttribute("data-type") === "wnd") {
@@ -226,7 +226,7 @@ export const getAllLayout = () => {
 
 const initInternalDock = (dockItem: Config.IUILayoutDockTab[]) => {
     dockItem.forEach((existSubItem, index) => {
-        if (window.siyuan.isPublish && existSubItem.type === "inbox") {
+        if (window.siyuan.isPublish && (existSubItem.type === "inbox" || existSubItem.type === "agentChat")) {
             dockItem.splice(index, 1);
             return;
         }
@@ -481,7 +481,7 @@ export const JSONToLayout = (app: App, isStart: boolean) => {
     }
     if (window.siyuan.layout.leftDock.layout.children[0].element.classList.contains("fn__none") &&
         window.siyuan.layout.leftDock.layout.children[1].element.classList.contains("fn__none")) {
-        window.siyuan.layout.rightDock.layout.element.style.width = "0px";
+        window.siyuan.layout.leftDock.layout.element.style.width = "0px";
     }
     if (window.siyuan.layout.bottomDock.layout.children[0].element.classList.contains("fn__none") &&
         window.siyuan.layout.bottomDock.layout.children[1].element.classList.contains("fn__none")) {

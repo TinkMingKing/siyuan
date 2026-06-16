@@ -20,11 +20,12 @@ import (
 	"path/filepath"
 
 	"github.com/siyuan-note/siyuan/kernel/model"
+	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
 var ImportTool = &Tool{
 	Name:        "import",
-	Description: "Import operations for SiYuan.\n- md: Import a Markdown file or directory. Requires: notebook, path (absolute local path). Optional: targetPath.\n- sy: Import a .sy.zip archive. Requires: notebook, path (absolute local path). Optional: targetPath.\n- data: Import a full data backup zip. Requires: path (absolute local path).",
+	Description: "Import operations (absolute local paths). Actions: md(notebook, path, targetPath?), sy(notebook, path, targetPath?) — .sy.zip, data(path) — full backup zip.",
 	InputSchema: ToolSchema{
 		Type: "object",
 		Properties: map[string]Property{
@@ -78,7 +79,7 @@ func importMd(args map[string]interface{}) (CallToolResult, error) {
 	if err := model.ImportFromLocalPath(notebook, absPath, targetPath); err != nil {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "import md failed: " + err.Error()}}, IsError: true}, nil
 	}
-	model.AppendPushReloadFiletreeEntry()
+	util.PushReloadFiletree()
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "markdown imported to notebook " + notebook}}}, nil
 }
 
@@ -102,7 +103,7 @@ func importSy(args map[string]interface{}) (CallToolResult, error) {
 	if err := model.ImportSY(absPath, notebook, targetPath); err != nil {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "import sy failed: " + err.Error()}}, IsError: true}, nil
 	}
-	model.AppendPushReloadFiletreeEntry()
+	util.PushReloadFiletree()
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "sy archive imported to notebook " + notebook}}}, nil
 }
 

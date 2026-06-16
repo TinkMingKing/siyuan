@@ -13,10 +13,8 @@ import {
     progressBackgroundTask,
     progressLoading,
     progressStatus,
-    reloadSync,
     setDefRefCount,
     setRefDynamicText,
-    setTitle,
     transactionError
 } from "../dialog/processSystem";
 import {initMessage} from "../dialog/message";
@@ -29,6 +27,8 @@ import {reloadEmoji} from "../emoji";
 import {updateAppearance} from "../config/util/updateAppearance";
 import {renderSnippet} from "../config/util/snippets";
 import {setBodyHighlight} from "../util/assets";
+import {reloadSync} from "../util/reloadSync";
+import {setTitle} from "../util/processTitle";
 
 class App {
     public plugins: import("../plugin").Plugin[] = [];
@@ -173,7 +173,6 @@ class App {
 
         window.siyuan = {
             zIndex: 10,
-            transactions: [],
             reqIds: {},
             backStack: [],
             layout: {},

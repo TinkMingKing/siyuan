@@ -22,11 +22,12 @@ import (
 
 	"github.com/siyuan-note/siyuan/kernel/model"
 	"github.com/siyuan-note/siyuan/kernel/sql"
+	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
 var AttrTool = &Tool{
 	Name:        "attr",
-	Description: "Block attribute operations for SiYuan.\n- get: Get all custom attributes of a block. Requires: id.\n- set: Set custom attributes on a block. Requires: id, attrs (object like {\"key\":\"value\"}).\n- batch-get: Batch get attributes for multiple blocks. Requires: ids (comma-separated block IDs).",
+	Description: "Block custom-attribute operations. Actions: get(id), set(id, attrs object), batch-get(ids comma-separated).",
 	InputSchema: ToolSchema{
 		Type: "object",
 		Properties: map[string]Property{
@@ -99,6 +100,7 @@ func attrSet(args map[string]interface{}) (CallToolResult, error) {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "set attrs failed: " + err.Error()}}, IsError: true}, nil
 	}
 
+	util.PushReloadFiletree()
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "attributes set for: " + id}}}, nil
 }
 

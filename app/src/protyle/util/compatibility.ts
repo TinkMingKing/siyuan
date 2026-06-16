@@ -3,13 +3,12 @@ import {fetchPost, fetchSyncPost} from "../../util/fetch";
 import {Constants} from "../../constants";
 /// #if !BROWSER
 import {ipcRenderer} from "electron";
-import * as fs from "fs";
 /// #endif
 /// #if MOBILE
 import {processSYLink} from "../../editor/openLink";
 /// #endif
 import {getDefaultSubType, getDefaultType} from "../../search/getDefault";
-import {showMessage} from "../../dialog/message";
+import {hideMessage, showMessage} from "../../dialog/message";
 
 export const isPhablet = () => {
     return /Android|webOS|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Tablet/i.test(navigator.userAgent) || isIPhone() || isIPad();
@@ -100,7 +99,7 @@ export const openByMobile = (uri: string) => {
     }
 };
 
-export const saveExportFile = async (uri: string) => {
+export const saveExportFile = async (uri: string, msgId?: string) => {
     if (!uri) {
         return;
     }
@@ -123,39 +122,66 @@ export const saveExportFile = async (uri: string) => {
             properties: ["showOverwriteConfirmation"],
         });
         if (result.canceled || !result.filePath) {
+            if (msgId) {
+                hideMessage(msgId);
+            }
             return;
         }
-        const response = await fetch(resolved.href);
-        if (!response.ok) {
-            throw new Error(
-                `HTTP ${response.status} ${response.statusText}: ${response.url || resolved.href}`
-            );
+        const copyResponse = await (await fetch("/api/export/copyExportFile", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                srcPath: resolved.pathname,
+                dest: result.filePath,
+            }),
+        })).json();
+        if (copyResponse.code !== 0) {
+            throw new Error(copyResponse.msg);
         }
-        const arrayBuffer = await response.arrayBuffer();
-        fs.writeFileSync(result.filePath, Buffer.from(arrayBuffer));
+        if (msgId) {
+            hideMessage(msgId);
+        }
         showMessage(window.siyuan.languages.exported);
         return;
     } catch (e) {
+        if (msgId) {
+            hideMessage(msgId);
+        }
         showMessage("saveExportFile failed: " + e);
     }
     /// #else
     try {
         if (isInAndroid()) {
             window.JSAndroid.saveExportFile(uri);
+            if (msgId) {
+                hideMessage(msgId);
+            }
             return;
         }
         if (isInIOS()) {
             window.webkit.messageHandlers.saveExportFile.postMessage(uri);
+            if (msgId) {
+                hideMessage(msgId);
+            }
             return;
         }
         if (isInHarmony()) {
             window.JSHarmony.saveExportFile(uri);
+            if (msgId) {
+                hideMessage(msgId);
+            }
             return;
         }
         const openUrl = new URL(uri, `${location.origin}/`);
         openUrl.searchParams.set("download", "true");
         window.open(openUrl.href);
+        if (msgId) {
+            hideMessage(msgId);
+        }
     } catch (e) {
+        if (msgId) {
+            hideMessage(msgId);
+        }
         showMessage("saveExportFile failed: " + e);
     }
     /// #endif
@@ -429,7 +455,12 @@ export function isChromeBrowser(): boolean {
         }
     };
     if (nav.userAgentData && Array.isArray(nav.userAgentData.brands)) {
-        return nav.userAgentData.brands.some((b: any) => /Chrome|Chromium/i.test(b.brand));
+        const brands = nav.userAgentData.brands.map((b) => b.brand);
+        // Edge、Opera 等 Chromium 内核浏览器 brands 中同样包含 Chromium，需与 userAgent 回退逻辑一致排除
+        if (brands.some((brand) => /Edge|Opera|OPR/i.test(brand))) {
+            return false;
+        }
+        return brands.some((brand) => /Chrome|Chromium/i.test(brand));
     }
     // 回退到 userAgent
     const ua = nav.userAgent || "";

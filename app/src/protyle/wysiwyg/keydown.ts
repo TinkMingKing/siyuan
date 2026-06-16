@@ -46,7 +46,7 @@ import {
     updateTransaction
 } from "./transaction";
 import {fontEvent} from "../toolbar/Font";
-import {addSubList, listIndent, listOutdent} from "./list";
+import {addSubList, listIndent, listOutdent, toggleTaskListItem} from "./list";
 import {newFileContentBySelect, rename, replaceFileName} from "../../editor/rename";
 import {cancelSB, insertEmptyBlock, jumpToParent} from "../../block/util";
 import {isLocalPath} from "../../util/pathName";
@@ -65,7 +65,7 @@ import * as dayjs from "dayjs";
 import {highlightRender} from "../render/highlightRender";
 import {countBlockWord} from "../../layout/status";
 import {moveToDown, moveToUp} from "./move";
-import {pasteAsPlainText} from "../util/paste";
+import {beforePaste, pasteAsPlainText} from "../util/paste";
 import {preventScroll} from "../scroll/preventScroll";
 import {getSavePath, newFileBySelect} from "../../util/newFile";
 import {removeSearchMark} from "../toolbar/util";
@@ -77,6 +77,7 @@ import {onlyProtyleCommand} from "../../boot/globalEvent/command/protyle";
 import {AIChat} from "../../ai/chat";
 import {updateCalloutType} from "./callout";
 import {tabCodeBlock} from "./codeBlock";
+import {getTopBarHeight} from "../../layout/getTopBarHeight";
 
 export const getContentByInlineHTML = (range: Range, cb: (content: string) => void) => {
     let html = "";
@@ -539,7 +540,7 @@ export const keydown = (protyle: IProtyle, editorElement: HTMLElement) => {
             const contentRect = protyle.contentElement.getBoundingClientRect();
             let centerElement = document.elementFromPoint(contentRect.x + contentRect.width / 2, contentRect.y + contentRect.height / 2);
             if (centerElement.classList.contains("protyle-wysiwyg")) {
-                centerElement = document.elementFromPoint(contentRect.x + contentRect.width / 2, contentRect.y + contentRect.height / 2 + Constants.SIZE_TOOLBAR_HEIGHT);
+                centerElement = document.elementFromPoint(contentRect.x + contentRect.width / 2, contentRect.y + contentRect.height / 2 + getTopBarHeight());
             }
             const centerBlockElement = hasClosestBlock(centerElement);
             if (centerBlockElement && centerBlockElement !== nodeElement) {
@@ -1498,7 +1499,6 @@ export const keydown = (protyle: IProtyle, editorElement: HTMLElement) => {
             !isInEmbedBlock(nodeElement)) {
             const editElement = getContenteditableElement(nodeElement);
             if (editElement) {
-                const id = nodeElement.getAttribute("data-node-id");
                 const html = nodeElement.outerHTML;
                 // 需要 EscapeHTMLStr https://github.com/siyuan-note/siyuan/issues/11451
                 editElement.innerHTML = "```" + window.siyuan.storage[Constants.LOCAL_CODELANG] + "\n" + Lute.EscapeHTMLStr(editElement.textContent) + "<wbr>\n```";
@@ -1712,16 +1712,7 @@ export const keydown = (protyle: IProtyle, editorElement: HTMLElement) => {
             if (!taskItemElement) {
                 return;
             }
-            const html = taskItemElement.outerHTML;
-            if (taskItemElement.classList.contains("protyle-task--done")) {
-                taskItemElement.querySelector("use").setAttribute("xlink:href", "#iconUncheck");
-                taskItemElement.classList.remove("protyle-task--done");
-            } else {
-                taskItemElement.querySelector("use").setAttribute("xlink:href", "#iconCheck");
-                taskItemElement.classList.add("protyle-task--done");
-            }
-            taskItemElement.setAttribute("updated", dayjs().format("YYYYMMDDHHmmss"));
-            updateTransaction(protyle, taskItemElement, html);
+            toggleTaskListItem(protyle, taskItemElement);
             event.preventDefault();
             event.stopPropagation();
             return;
@@ -1988,6 +1979,7 @@ export const keydown = (protyle: IProtyle, editorElement: HTMLElement) => {
             event.returnValue = false;
             event.preventDefault();
             event.stopPropagation();
+            beforePaste(protyle, nodeElement);
             pasteAsPlainText(protyle);
             return;
         }

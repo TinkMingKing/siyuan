@@ -19,18 +19,21 @@ package tools
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/siyuan-note/siyuan/kernel/model"
+	"github.com/siyuan-note/siyuan/kernel/sql"
+	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
 var NotebookTool = &Tool{
 	Name:        "notebook",
-	Description: "Notebook management for SiYuan.\n- list: List all notebooks.\n- create: Create a notebook. Requires: name.\n- rename: Rename a notebook. Requires: id, name.\n- remove: Remove a notebook. Requires: id.",
+	Description: "Notebook management. Actions: list(), open(id), close(id), create(name), rename(id, name), remove(id).",
 	InputSchema: ToolSchema{
 		Type: "object",
 		Properties: map[string]Property{
-			"action": {Type: "string", Description: "Operation", Enum: []string{"list", "create", "rename", "remove"}},
-			"id":     {Type: "string", Description: "Notebook ID (for rename, remove)"},
+			"action": {Type: "string", Description: "Operation", Enum: []string{"list", "open", "close", "create", "rename", "remove"}},
+			"id":     {Type: "string", Description: "Notebook ID (for open, close, rename, remove)"},
 			"name":   {Type: "string", Description: "Notebook name (for create, rename)"},
 		},
 		Required: []string{"action"},
@@ -47,6 +50,10 @@ func notebookHandler(args map[string]interface{}) (CallToolResult, error) {
 	switch action {
 	case "list":
 		return notebookList(args)
+	case "open":
+		return notebookOpen(args)
+	case "close":
+		return notebookClose(args)
 	case "create":
 		return notebookCreate(args)
 	case "rename":
@@ -55,7 +62,7 @@ func notebookHandler(args map[string]interface{}) (CallToolResult, error) {
 		return notebookRemove(args)
 	}
 	return CallToolResult{
-		Content: []ContentItem{{Type: "text", Text: "unknown action '" + action + "', expected one of: [list, create, rename, remove]"}},
+		Content: []ContentItem{{Type: "text", Text: "unknown action '" + action + "', expected one of: [list, open, close, create, rename, remove]"}},
 		IsError: true,
 	}, nil
 }
@@ -85,6 +92,12 @@ func notebookCreate(args map[string]interface{}) (CallToolResult, error) {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "create notebook failed: " + err.Error()}}, IsError: true}, nil
 	}
 
+	if box := model.Conf.Box(id); nil != box {
+		evt := util.NewCmdResult("createnotebook", 0, util.PushModeBroadcast)
+		evt.Data = map[string]any{"box": box}
+		util.PushEvent(evt)
+	}
+
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "notebook created: " + name + " (id: " + id + ")"}}}, nil
 }
 
@@ -99,6 +112,10 @@ func notebookRename(args map[string]interface{}) (CallToolResult, error) {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "rename notebook failed: " + err.Error()}}, IsError: true}, nil
 	}
 
+	evt := util.NewCmdResult("renamenotebook", 0, util.PushModeBroadcast)
+	evt.Data = map[string]any{"box": id}
+	util.PushEvent(evt)
+
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "notebook renamed: " + id + " -> " + name}}}, nil
 }
 
@@ -112,5 +129,49 @@ func notebookRemove(args map[string]interface{}) (CallToolResult, error) {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "remove notebook failed: " + err.Error()}}, IsError: true}, nil
 	}
 
+	evt := util.NewCmdResult("removeBox", 0, util.PushModeBroadcast)
+	evt.Data = map[string]any{"box": id}
+	util.PushEvent(evt)
+
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "notebook removed: " + id}}}, nil
+}
+
+func notebookOpen(args map[string]interface{}) (CallToolResult, error) {
+	id, _ := args["id"].(string)
+	if id == "" {
+		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "id is required"}}, IsError: true}, nil
+	}
+
+	existed, err := model.Mount(id)
+	if err != nil {
+		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "open notebook failed: " + err.Error()}}, IsError: true}, nil
+	}
+
+	if box := model.Conf.Box(id); nil != box {
+		evt := util.NewCmdResult("mount", 0, util.PushModeBroadcast)
+		evt.Data = map[string]any{
+			"box":     box,
+			"existed": existed,
+		}
+		util.PushEvent(evt)
+	}
+
+	time.Sleep(1 * time.Second)
+	sql.FlushQueue()
+
+	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "notebook opened: " + id}}}, nil
+}
+
+func notebookClose(args map[string]interface{}) (CallToolResult, error) {
+	id, _ := args["id"].(string)
+	if id == "" {
+		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "id is required"}}, IsError: true}, nil
+	}
+
+	model.Unmount(id)
+
+	time.Sleep(1 * time.Second)
+	sql.FlushQueue()
+
+	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "notebook closed: " + id}}}, nil
 }

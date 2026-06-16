@@ -211,7 +211,6 @@ export const fileAnnotationRefMenu = (protyle: IProtyle, refElement: HTMLElement
         return;
     }
     hideElements(["util", "toolbar", "hint"], protyle);
-    const id = nodeElement.getAttribute("data-node-id");
     let oldHTML = nodeElement.outerHTML;
     window.siyuan.menus.menu.remove();
     window.siyuan.menus.menu.element.setAttribute("data-name", Constants.MENU_INLINE_FILE_ANNOTATION_REF);
@@ -714,7 +713,6 @@ export const contentMenu = (protyle: IProtyle, nodeElement: Element) => {
     protyle.toolbar.showContent(protyle, range, nodeElement);
     /// #else
     const oldHTML = nodeElement.outerHTML;
-    const id = nodeElement.getAttribute("data-node-id");
     const captionElement = hasClosestByTag(range.startContainer, "CAPTION");
     if (range.toString() !== "" || (range.cloneContents().childNodes[0] as HTMLElement)?.classList?.contains("emoji")) {
         window.siyuan.menus.menu.append(new MenuItem({
@@ -786,7 +784,6 @@ export const contentMenu = (protyle: IProtyle, nodeElement: Element) => {
                     }
                 }).element);
                 if (!protyle.disabled) {
-                    const id = nodeElement.getAttribute("data-node-id");
                     window.siyuan.menus.menu.append(new MenuItem({
                         id: "cut",
                         icon: "iconCut",
@@ -989,21 +986,22 @@ export const zoomOut = (options: {
         id: options.id,
         size: options.id === options.protyle.block.rootID ? window.siyuan.config.editor.dynamicLoadBlocks : Constants.SIZE_GET_MAX,
     }, async (getResponse) => {
-        if (options.isPushBack) {
-            onGet({
-                data: getResponse,
-                protyle: options.protyle,
-                action: options.id === options.protyle.block.rootID ? [Constants.CB_GET_FOCUS, Constants.CB_GET_HTML] : [Constants.CB_GET_ALL, Constants.CB_GET_FOCUS, Constants.CB_GET_HTML],
-                afterCB: options.callback,
-            });
-        } else {
-            onGet({
-                data: getResponse,
-                protyle: options.protyle,
-                action: options.id === options.protyle.block.rootID ? [Constants.CB_GET_FOCUS, Constants.CB_GET_HTML, Constants.CB_GET_UNUNDO] : [Constants.CB_GET_ALL, Constants.CB_GET_FOCUS, Constants.CB_GET_UNUNDO, Constants.CB_GET_HTML],
-                afterCB: options.callback,
-            });
+        const action: TProtyleAction[] = [Constants.CB_GET_HTML];
+        if (!options.isPushBack) {
+            action.push(Constants.CB_GET_UNUNDO);
         }
+        if (options.id !== options.protyle.block.rootID) {
+            action.push(Constants.CB_GET_ALL);
+        }
+        if (options.focusId) {
+            action.push(Constants.CB_GET_FOCUS);
+        }
+        onGet({
+            data: getResponse,
+            protyle: options.protyle,
+            action,
+            afterCB: options.callback,
+        });
         // https://github.com/siyuan-note/siyuan/issues/4874
         if (options.focusId) {
             let focusElement = options.protyle.wysiwyg.element.querySelector(`[data-node-id="${options.focusId}"]`);
@@ -1480,7 +1478,6 @@ export const linkMenu = (protyle: IProtyle, linkElement: HTMLElement, focusText 
     }
     hideTooltip();
     hideElements(["util", "toolbar", "hint"], protyle);
-    const id = nodeElement.getAttribute("data-node-id");
     let html = nodeElement.outerHTML;
     const linkAddress = linkElement.getAttribute("data-href");
     let inputElements: NodeListOf<HTMLTextAreaElement>;
@@ -1768,7 +1765,6 @@ export const tagMenu = (protyle: IProtyle, tagElement: HTMLElement) => {
         return;
     }
     hideElements(["util", "toolbar", "hint"], protyle);
-    const id = nodeElement.getAttribute("data-node-id");
     let inputElement: HTMLInputElement;
     const oldHTML = nodeElement.outerHTML;
     window.siyuan.menus.menu.removeCB = () => {
@@ -1956,7 +1952,6 @@ export const inlineMathMenu = (protyle: IProtyle, element: Element) => {
     if (!nodeElement) {
         return;
     }
-    const id = nodeElement.getAttribute("data-node-id");
     const html = nodeElement.outerHTML;
     window.siyuan.menus.menu.append(new MenuItem({
         id: "copy",
@@ -2035,7 +2030,6 @@ const genImageHeightMenu = (label: string, imgElement: HTMLElement, protyle: IPr
 };
 
 export const iframeMenu = (protyle: IProtyle, nodeElement: Element) => {
-    const id = nodeElement.getAttribute("data-node-id");
     const iframeElement = nodeElement.querySelector("iframe");
     let html = nodeElement.outerHTML;
     const subMenus: IMenu[] = [{
@@ -2106,7 +2100,6 @@ export const iframeMenu = (protyle: IProtyle, nodeElement: Element) => {
 };
 
 export const videoMenu = (protyle: IProtyle, nodeElement: Element, type: string) => {
-    const id = nodeElement.getAttribute("data-node-id");
     const videoElement = nodeElement.querySelector(type === "NodeVideo" ? "video" : "audio");
     let html = nodeElement.outerHTML;
     const subMenus: IMenu[] = [{
@@ -2197,6 +2190,16 @@ export const tableMenu = (protyle: IProtyle, nodeElement: Element, cellElement: 
                         const tbodyElement = nodeElement.querySelector("tbody");
                         const theadElement = nodeElement.querySelector("thead");
                         while (prueTrElement !== theadElement.lastElementChild) {
+                            theadElement.lastElementChild.querySelectorAll("th").forEach(item => {
+                                const td = document.createElement("td");
+                                Array.from(item.attributes).forEach(attr => {
+                                    td.setAttribute(attr.name, attr.value);
+                                });
+                                while (item.firstChild) {
+                                    td.appendChild(item.firstChild);
+                                }
+                                item.replaceWith(td);
+                            });
                             tbodyElement.insertAdjacentElement("afterbegin", theadElement.lastElementChild);
                         }
                     }

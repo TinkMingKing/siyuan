@@ -25,6 +25,7 @@ import (
 
 	"github.com/siyuan-note/siyuan/kernel/filesys"
 	"github.com/siyuan-note/siyuan/kernel/model"
+	"github.com/siyuan-note/siyuan/kernel/treenode"
 	"github.com/siyuan-note/siyuan/kernel/util"
 
 	"github.com/spf13/cobra"
@@ -153,33 +154,6 @@ var blockKramdownCmd = &cobra.Command{
 	},
 }
 
-var blockInfoCmd = &cobra.Command{
-	Use:   "info --id <id>",
-	Short: "Get document info",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		id, _ := cmd.Flags().GetString("id")
-		if id == "" {
-			return fmt.Errorf("--id is required")
-		}
-		info, err := model.GetDocInfo(id)
-		if err != nil {
-			return err
-		}
-		switch outputFormat {
-		case "json":
-			data, _ := json.MarshalIndent(info, "", "  ")
-			fmt.Println(string(data))
-		default:
-			fmt.Printf("ID:           %s\n", info.ID)
-			fmt.Printf("RootID:       %s\n", info.RootID)
-			fmt.Printf("Name:         %s\n", info.Name)
-			fmt.Printf("RefCount:     %d\n", info.RefCount)
-			fmt.Printf("SubFileCount: %d\n", info.SubFileCount)
-		}
-		return nil
-	},
-}
-
 var blockStatCmd = &cobra.Command{
 	Use:   "stat --id <id>",
 	Short: "Get block content statistics",
@@ -220,6 +194,14 @@ var blockInsertCmd = &cobra.Command{
 			return fmt.Errorf("--parent is required")
 		}
 
+		if dryRun {
+			fmt.Printf("[dry-run] Would insert block under parent %s\n", parentID)
+			if previousID != "" {
+				fmt.Printf("         after previous sibling %s\n", previousID)
+			}
+			return nil
+		}
+
 		data, err := resolveData(cmd)
 		if err != nil {
 			return err
@@ -236,7 +218,9 @@ var blockInsertCmd = &cobra.Command{
 		}}
 		model.PerformTransactions(&transactions)
 		model.FlushTxQueue()
-		model.AppendPushReloadProtyleEntry(parentID)
+		if bt := treenode.GetBlockTree(parentID); bt != nil {
+			model.AppendPushReloadProtyleEntry(bt.RootID)
+		}
 		fmt.Println("ok")
 		return nil
 	},
@@ -249,6 +233,11 @@ var blockAppendCmd = &cobra.Command{
 		parentID, _ := cmd.Flags().GetString("parent")
 		if parentID == "" {
 			return fmt.Errorf("--parent is required")
+		}
+
+		if dryRun {
+			fmt.Printf("[dry-run] Would append block to parent %s\n", parentID)
+			return nil
 		}
 
 		data, err := resolveData(cmd)
@@ -266,7 +255,9 @@ var blockAppendCmd = &cobra.Command{
 		}}
 		model.PerformTransactions(&transactions)
 		model.FlushTxQueue()
-		model.AppendPushReloadProtyleEntry(parentID)
+		if bt := treenode.GetBlockTree(parentID); bt != nil {
+			model.AppendPushReloadProtyleEntry(bt.RootID)
+		}
 		fmt.Println("ok")
 		return nil
 	},
@@ -279,6 +270,11 @@ var blockPrependCmd = &cobra.Command{
 		parentID, _ := cmd.Flags().GetString("parent")
 		if parentID == "" {
 			return fmt.Errorf("--parent is required")
+		}
+
+		if dryRun {
+			fmt.Printf("[dry-run] Would prepend block to parent %s\n", parentID)
+			return nil
 		}
 
 		data, err := resolveData(cmd)
@@ -296,7 +292,9 @@ var blockPrependCmd = &cobra.Command{
 		}}
 		model.PerformTransactions(&transactions)
 		model.FlushTxQueue()
-		model.AppendPushReloadProtyleEntry(parentID)
+		if bt := treenode.GetBlockTree(parentID); bt != nil {
+			model.AppendPushReloadProtyleEntry(bt.RootID)
+		}
 		fmt.Println("ok")
 		return nil
 	},
@@ -309,6 +307,11 @@ var blockUpdateCmd = &cobra.Command{
 		id, _ := cmd.Flags().GetString("id")
 		if id == "" {
 			return fmt.Errorf("--id is required")
+		}
+
+		if dryRun {
+			fmt.Printf("[dry-run] Would update block %s\n", id)
+			return nil
 		}
 
 		data, err := resolveData(cmd)
@@ -326,13 +329,15 @@ var blockUpdateCmd = &cobra.Command{
 		}}
 		model.PerformTransactions(&transactions)
 		model.FlushTxQueue()
-		model.AppendPushReloadProtyleEntry(id)
+		if bt := treenode.GetBlockTree(id); bt != nil {
+			model.AppendPushReloadProtyleEntry(bt.RootID)
+		}
 		fmt.Println("ok")
 		return nil
 	},
 }
 
-var blockDeleteCmd = &cobra.Command{
+	var blockDeleteCmd = &cobra.Command{
 	Use:   "delete --id <id>",
 	Short: "Delete block",
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -340,6 +345,13 @@ var blockDeleteCmd = &cobra.Command{
 		if id == "" {
 			return fmt.Errorf("--id is required")
 		}
+
+		if dryRun {
+			fmt.Printf("[dry-run] Would delete block %s\n", id)
+			return nil
+		}
+
+		bt := treenode.GetBlockTree(id)
 
 		transactions := []*model.Transaction{{
 			DoOperations: []*model.Operation{{
@@ -349,7 +361,10 @@ var blockDeleteCmd = &cobra.Command{
 		}}
 		model.PerformTransactions(&transactions)
 		model.FlushTxQueue()
-		model.AppendPushReloadProtyleEntry(id)
+
+		if bt != nil {
+			model.AppendPushReloadProtyleEntry(bt.RootID)
+		}
 		fmt.Println(id)
 		return nil
 	},
@@ -366,6 +381,14 @@ var blockMoveCmd = &cobra.Command{
 			return fmt.Errorf("--id and --parent are required")
 		}
 
+		if dryRun {
+			fmt.Printf("[dry-run] Would move block %s to parent %s\n", id, parentID)
+			if previousID != "" {
+				fmt.Printf("         after previous sibling %s\n", previousID)
+			}
+			return nil
+		}
+
 		transactions := []*model.Transaction{{
 			DoOperations: []*model.Operation{{
 				Action:     "move",
@@ -376,7 +399,9 @@ var blockMoveCmd = &cobra.Command{
 		}}
 		model.PerformTransactions(&transactions)
 		model.FlushTxQueue()
-		model.AppendPushReloadProtyleEntry(id)
+		if bt := treenode.GetBlockTree(id); bt != nil {
+			model.AppendPushReloadProtyleEntry(bt.RootID)
+		}
 		fmt.Println("ok")
 		return nil
 	},
@@ -428,7 +453,6 @@ func init() {
 	blockDomCmd.Flags().String("id", "", "block ID")
 	blockKramdownCmd.Flags().String("id", "", "block ID")
 	blockKramdownCmd.Flags().String("mode", "md", "export mode: md | textmark")
-	blockInfoCmd.Flags().String("id", "", "document block ID")
 	blockStatCmd.Flags().String("id", "", "block ID")
 
 	blockInsertCmd.Flags().String("parent", "", "parent block ID")
@@ -460,7 +484,6 @@ func init() {
 	blockCmd.AddCommand(blockBreadcrumbCmd)
 	blockCmd.AddCommand(blockDomCmd)
 	blockCmd.AddCommand(blockKramdownCmd)
-	blockCmd.AddCommand(blockInfoCmd)
 	blockCmd.AddCommand(blockStatCmd)
 	blockCmd.AddCommand(blockInsertCmd)
 	blockCmd.AddCommand(blockAppendCmd)

@@ -22,11 +22,12 @@ import (
 
 	"github.com/siyuan-note/siyuan/kernel/model"
 	"github.com/siyuan-note/siyuan/kernel/treenode"
+	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
 var RepoTool = &Tool{
 	Name:        "repo",
-	Description: "Repository (data snapshot) operations for SiYuan.\n- list: List all snapshots. Optional: tag (bool), page (default 1).\n- create: Create a new snapshot. Optional: memo.\n- tag: Tag a snapshot. Requires: id, name.\n- untag: Remove a tag from snapshots. Requires: name.\n- checkout: Rollback to a snapshot. Requires: id.\n- diff: Diff two snapshots. Requires: left, right.\n- search: Search files within snapshots. Requires: keyword. Optional: page.\n- purge: Purge old snapshots.\n- file_get: Get file content from a snapshot. Requires: id.\n- file_rollback: Rollback a single file from snapshot. Requires: id.\n- file_open: Preview file content from snapshot. Requires: id.\n- file_export: Export file from snapshot to temp file. Requires: id.",
+	Description: "Repository (data snapshot) operations. Actions: list(tag?, page=1), create(memo?), tag(id, name), untag(name), checkout(id), diff(left, right), search(keyword, page?), purge(), file_get(id), file_rollback(id), file_open(id), file_export(id).",
 	InputSchema: ToolSchema{
 		Type: "object",
 		Properties: map[string]Property{
@@ -129,10 +130,11 @@ func repoList(args map[string]interface{}) (CallToolResult, error) {
 
 func repoCreate(args map[string]interface{}) (CallToolResult, error) {
 	memo, _ := args["memo"].(string)
-	if err := model.IndexRepo(memo); err != nil {
+	id, err := model.IndexRepo(memo)
+	if err != nil {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "create snapshot failed: " + err.Error()}}, IsError: true}, nil
 	}
-	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "snapshot created"}}}, nil
+	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "snapshot created: " + id}}}, nil
 }
 
 func repoTag(args map[string]interface{}) (CallToolResult, error) {
@@ -164,8 +166,8 @@ func repoCheckout(args map[string]interface{}) (CallToolResult, error) {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "id is required"}}, IsError: true}, nil
 	}
 	model.CheckoutRepoDirect(id)
-	model.AppendPushReloadFiletreeEntry()
-	model.AppendPushReloadUIEntry()
+	util.PushReloadFiletree()
+	util.ReloadUI()
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "checkout to snapshot: " + id}}}, nil
 }
 
@@ -260,7 +262,7 @@ func repoFileRollback(args map[string]interface{}) (CallToolResult, error) {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "rollback repo file failed: " + err.Error()}}, IsError: true}, nil
 	}
 	if bt := treenode.GetBlockTree(id); bt != nil {
-		model.AppendPushReloadProtyleEntry(bt.RootID)
+		util.PushReloadProtyle(bt.RootID)
 	}
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "file rolled back: " + id}}}, nil
 }

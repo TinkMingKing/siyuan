@@ -22,17 +22,19 @@ import (
 
 	"github.com/siyuan-note/siyuan/kernel/filesys"
 	"github.com/siyuan-note/siyuan/kernel/model"
+	"github.com/siyuan-note/siyuan/kernel/treenode"
 	"github.com/siyuan-note/siyuan/kernel/util"
 )
 
 var BlockTool = &Tool{
 	Name:        "block",
-	Description: "Block operations for SiYuan.\n- get: Get block info by ID. Requires: id.\n- get_kramdown: Get block kramdown by ID. Requires: id.\n- get_children: Get child blocks by parent ID. Requires: id.\n- tree_stat: Get tree statistics (word count, character count, block count, etc.) by document ID. Requires: id.\n- dom: Get block DOM by ID. Requires: id.\n- insert: Insert a new block. Requires: data, dataType (markdown or dom). Optional: parentID, nextID, previousID.\n- append: Append a child block. Requires: data, dataType, parentID.\n- prepend: Prepend a child block. Requires: data, dataType, parentID.\n- update: Update a block. Requires: id, data, dataType.\n- delete: Delete a block. Requires: id.\n- move: Move a block. Requires: id, parentID. Optional: previousID.\n- breadcrumb: Get block breadcrumb path. Requires: id.",
+	Description: "Block operations. Actions: get(id), get_kramdown(id), get_children(id), tree_stat(id, by document), dom(id), insert(data, dataType, parentID?, nextID?, previousID?), append(data, dataType, parentID) / prepend(...) add a NEW child — use after block.update when both modifying and adding, update(id, data, dataType) replaces ONE block only (no append), delete(id), move(id, parentID, previousID?), breadcrumb(id), batch_get(ids) / batch_kramdown(ids) where ids is comma-separated.",
 	InputSchema: ToolSchema{
 		Type: "object",
 		Properties: map[string]Property{
-			"action":     {Type: "string", Description: "Operation", Enum: []string{"get", "get_kramdown", "get_children", "tree_stat", "dom", "insert", "append", "prepend", "update", "delete", "move", "breadcrumb"}},
+			"action":     {Type: "string", Description: "Operation", Enum: []string{"get", "get_kramdown", "get_children", "tree_stat", "dom", "insert", "append", "prepend", "update", "delete", "move", "breadcrumb", "batch_get", "batch_kramdown"}},
 			"id":         {Type: "string", Description: "Block ID"},
+			"ids":        {Type: "string", Description: "Comma-separated block IDs (for batch_get, batch_kramdown)"},
 			"data":       {Type: "string", Description: "Content (markdown or dom)"},
 			"dataType":   {Type: "string", Description: "Content type: markdown or dom", Enum: []string{"markdown", "dom"}},
 			"parentID":   {Type: "string", Description: "Parent block ID"},
@@ -75,9 +77,13 @@ func blockHandler(args map[string]interface{}) (CallToolResult, error) {
 		return blockMove(args)
 	case "breadcrumb":
 		return blockBreadcrumb(args)
+	case "batch_get":
+		return blockBatchGet(args)
+	case "batch_kramdown":
+		return blockBatchKramdown(args)
 	}
 	return CallToolResult{
-		Content: []ContentItem{{Type: "text", Text: "unknown action '" + action + "', expected one of: [get, get_kramdown, get_children, tree_stat, dom, insert, append, prepend, update, delete, move, breadcrumb]"}},
+		Content: []ContentItem{{Type: "text", Text: "unknown action '" + action + "', expected one of: [get, get_kramdown, get_children, tree_stat, dom, insert, append, prepend, update, delete, move, breadcrumb, batch_get, batch_kramdown]"}},
 		IsError: true,
 	}, nil
 }
@@ -178,7 +184,20 @@ func blockInsert(args map[string]interface{}) (CallToolResult, error) {
 
 	model.PerformTransactions(&transactions)
 	model.FlushTxQueue()
-	model.AppendPushReloadProtyleEntry(parentID)
+
+	reloadID := nextID
+	if reloadID == "" {
+		reloadID = previousID
+	}
+	if reloadID == "" {
+		reloadID = parentID
+	}
+	if reloadID != "" {
+		if bt := treenode.GetBlockTree(reloadID); bt != nil {
+			util.PushReloadProtyle(bt.RootID)
+		}
+	}
+
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "block inserted"}}}, nil
 }
 
@@ -210,7 +229,10 @@ func blockAppend(args map[string]interface{}) (CallToolResult, error) {
 
 	model.PerformTransactions(&transactions)
 	model.FlushTxQueue()
-	model.AppendPushReloadProtyleEntry(parentID)
+
+	if bt := treenode.GetBlockTree(parentID); bt != nil {
+		util.PushReloadProtyle(bt.RootID)
+	}
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "block appended"}}}, nil
 }
 
@@ -242,7 +264,10 @@ func blockPrepend(args map[string]interface{}) (CallToolResult, error) {
 
 	model.PerformTransactions(&transactions)
 	model.FlushTxQueue()
-	model.AppendPushReloadProtyleEntry(parentID)
+
+	if bt := treenode.GetBlockTree(parentID); bt != nil {
+		util.PushReloadProtyle(bt.RootID)
+	}
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "block prepended"}}}, nil
 }
 
@@ -274,7 +299,10 @@ func blockUpdate(args map[string]interface{}) (CallToolResult, error) {
 
 	model.PerformTransactions(&transactions)
 	model.FlushTxQueue()
-	model.AppendPushReloadProtyleEntry(id)
+
+	if bt := treenode.GetBlockTree(id); bt != nil {
+		util.PushReloadProtyle(bt.RootID)
+	}
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "block updated"}}}, nil
 }
 
@@ -283,6 +311,8 @@ func blockDelete(args map[string]interface{}) (CallToolResult, error) {
 	if id == "" {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "id is required"}}, IsError: true}, nil
 	}
+
+	bt := treenode.GetBlockTree(id)
 
 	transactions := []*model.Transaction{{
 		DoOperations: []*model.Operation{{
@@ -293,7 +323,10 @@ func blockDelete(args map[string]interface{}) (CallToolResult, error) {
 
 	model.PerformTransactions(&transactions)
 	model.FlushTxQueue()
-	model.AppendPushReloadProtyleEntry(id)
+
+	if bt != nil {
+		util.PushReloadProtyle(bt.RootID)
+	}
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "block deleted: " + id}}}, nil
 }
 
@@ -338,7 +371,10 @@ func blockMove(args map[string]interface{}) (CallToolResult, error) {
 
 	model.PerformTransactions(&transactions)
 	model.FlushTxQueue()
-	model.AppendPushReloadProtyleEntry(id)
+
+	if bt := treenode.GetBlockTree(id); bt != nil {
+		util.PushReloadProtyle(bt.RootID)
+	}
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "block moved: " + id}}}, nil
 }
 
@@ -384,4 +420,72 @@ func blockDom(args map[string]interface{}) (CallToolResult, error) {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "block not found or empty: " + id}}, IsError: true}, nil
 	}
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: dom}}}, nil
+}
+
+func blockBatchGet(args map[string]interface{}) (CallToolResult, error) {
+	idsStr, _ := args["ids"].(string)
+	if idsStr == "" {
+		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "ids is required (comma-separated)"}}, IsError: true}, nil
+	}
+
+	ids := strings.Split(idsStr, ",")
+	for i := range ids {
+		ids[i] = strings.TrimSpace(ids[i])
+	}
+
+	if len(ids) == 0 {
+		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "no valid IDs provided"}}, IsError: true}, nil
+	}
+
+	infos := model.GetDocsInfo(ids, false, false)
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Batch get %d blocks (found %d):\n\n", len(ids), len(infos)))
+	for _, info := range infos {
+		sb.WriteString(fmt.Sprintf("- %s: %s (rootID: %s, refCount: %d)\n", info.ID, info.Name, info.RootID, info.RefCount))
+	}
+	for _, id := range ids {
+		found := false
+		for _, info := range infos {
+			if info.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			sb.WriteString(fmt.Sprintf("- %s: not found\n", id))
+		}
+	}
+
+	return CallToolResult{Content: []ContentItem{{Type: "text", Text: sb.String()}}}, nil
+}
+
+func blockBatchKramdown(args map[string]interface{}) (CallToolResult, error) {
+	idsStr, _ := args["ids"].(string)
+	if idsStr == "" {
+		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "ids is required (comma-separated)"}}, IsError: true}, nil
+	}
+
+	ids := strings.Split(idsStr, ",")
+	for i := range ids {
+		ids[i] = strings.TrimSpace(ids[i])
+	}
+
+	if len(ids) == 0 {
+		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "no valid IDs provided"}}, IsError: true}, nil
+	}
+
+	kramdowns := model.GetBlockKramdowns(ids, "md")
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Batch kramdown %d blocks (found %d):\n\n", len(ids), len(kramdowns)))
+	for _, id := range ids {
+		if kd, ok := kramdowns[id]; ok {
+			sb.WriteString(fmt.Sprintf("--- %s ---\n%s\n\n", id, kd))
+		} else {
+			sb.WriteString(fmt.Sprintf("--- %s ---\n(not found)\n\n", id))
+		}
+	}
+
+	return CallToolResult{Content: []ContentItem{{Type: "text", Text: sb.String()}}}, nil
 }

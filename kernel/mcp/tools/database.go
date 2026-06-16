@@ -28,7 +28,7 @@ import (
 
 var DatabaseTool = &Tool{
 	Name:        "database",
-	Description: "Attribute view (database) operations for SiYuan.\n- search: Search for attribute views by keyword. Requires: keyword.\n- get: Get attribute view details by ID. Requires: id.\n- render: Render attribute view table. Requires: id. Optional: viewID, query, page (default 1), pageSize (default 50).\n- keys: List all keys (fields) of a database. Requires: id.\n- key_add: Add a key (field) to a database. Requires: id, name, type. Optional: icon, prev.\n- key_remove: Remove a key from a database. Requires: id, keyID. Optional: removeRelationDest.\n- item_add: Add a row to a database. Requires: id. Optional: blockID, content, viewID, groupID, previousID, detached, ignoreDefaultFill.\n- item_remove: Remove rows from a database. Requires: id, itemIDs (comma-separated).\n- item_update: Update a cell value. Requires: id, keyID, itemID, value (JSON string).\n- unused: List unused databases.\n- clean: Clean unused databases. Optional: id (single database ID to clean).",
+	Description: "Attribute view (database) operations. Actions: search(keyword), get(id), render(id, viewID?, query?, page=1, pageSize=50), keys(id), key_add(id, name, type, icon?, prev?), key_remove(id, keyID, removeRelationDest?), item_add(id, blockID?, content?, viewID?, groupID?, previousID?, detached?, ignoreDefaultFill?), item_remove(id, itemIDs comma-separated), item_update(id, keyID, itemID, value as JSON string), unused(), clean(id?).",
 	InputSchema: ToolSchema{
 		Type: "object",
 		Properties: map[string]Property{
@@ -207,7 +207,7 @@ func databaseKeyAdd(args map[string]interface{}) (CallToolResult, error) {
 	if err := model.AddAttributeViewKey(id, keyID, name, keyType, icon, prev); err != nil {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "add key failed: " + err.Error()}}, IsError: true}, nil
 	}
-	model.AppendPushReloadAttrViewEntry(id)
+	model.ReloadAttrView(id)
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("key added: %s (%s)", keyID, name)}}}, nil
 }
 
@@ -224,7 +224,7 @@ func databaseKeyRemove(args map[string]interface{}) (CallToolResult, error) {
 	if err := model.RemoveAttributeViewKey(id, keyID, removeRelation); err != nil {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "remove key failed: " + err.Error()}}, IsError: true}, nil
 	}
-	model.AppendPushReloadAttrViewEntry(id)
+	model.ReloadAttrView(id)
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "key removed: " + keyID}}}, nil
 }
 
@@ -260,7 +260,7 @@ func databaseItemAdd(args map[string]interface{}) (CallToolResult, error) {
 	if err := model.AddAttributeViewBlock(nil, srcs, id, blockID, viewID, groupID, previousID, ignoreFill); err != nil {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "add item failed: " + err.Error()}}, IsError: true}, nil
 	}
-	model.AppendPushReloadAttrViewEntry(id)
+	model.ReloadAttrView(id)
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "item added"}}}, nil
 }
 
@@ -277,7 +277,7 @@ func databaseItemRemove(args map[string]interface{}) (CallToolResult, error) {
 	if err := model.RemoveAttributeViewBlock(itemIDs, id); err != nil {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "remove items failed: " + err.Error()}}, IsError: true}, nil
 	}
-	model.AppendPushReloadAttrViewEntry(id)
+	model.ReloadAttrView(id)
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("%d item(s) removed", len(itemIDs))}}}, nil
 }
 
@@ -296,7 +296,7 @@ func databaseItemUpdate(args map[string]interface{}) (CallToolResult, error) {
 	if _, err := model.UpdateAttributeViewCell(nil, id, keyID, itemID, valueData); err != nil {
 		return CallToolResult{Content: []ContentItem{{Type: "text", Text: "update cell failed: " + err.Error()}}, IsError: true}, nil
 	}
-	model.AppendPushReloadAttrViewEntry(id)
+	model.ReloadAttrView(id)
 	return CallToolResult{Content: []ContentItem{{Type: "text", Text: "cell updated"}}}, nil
 }
 

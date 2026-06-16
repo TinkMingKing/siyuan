@@ -1,10 +1,11 @@
 import {Constants} from "../constants";
 /// #if !MOBILE
-import {Tab} from "./Tab";
+import type {Tab} from "./Tab";
 /// #endif
+import type {App} from "../index";
+import {kernelError} from "../util/kernelFault";
 import {processMessage} from "../util/processMessage";
-import {kernelError, reloadSync} from "../dialog/processSystem";
-import {App} from "../index";
+import {reloadSync} from "../util/reloadSync";
 
 interface IConnectOptions {
     id: string,
@@ -81,6 +82,10 @@ export class Model {
                 kernelError();
             }
         };
+        if (this.ws) {
+            this.ws.onclose = null;
+            this.ws.close();
+        }
         this.ws = ws;
     }
 

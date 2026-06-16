@@ -5,6 +5,7 @@ import {onGet} from "../util/onGet";
 import {isMobile} from "../../util/functions";
 import {hasClosestBlock, hasClosestByClassName} from "../util/hasClosest";
 import {stickyRow} from "../render/av/row";
+import {trimAVRows} from "../render/av/virtualScroll";
 
 let getIndexTimeout: number;
 export const scrollEvent = (protyle: IProtyle, element: HTMLElement) => {
@@ -25,7 +26,8 @@ export const scrollEvent = (protyle: IProtyle, element: HTMLElement) => {
             if (item.dataset.render !== "true") {
                 return;
             }
-            stickyRow(item, elementRect, "all");
+            stickyRow(item, element, "all");
+            trimAVRows(item, elementRect);
         });
 
         if (!protyle.element.classList.contains("block__edit") && !isMobile()) {
