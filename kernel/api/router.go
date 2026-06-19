@@ -31,6 +31,7 @@ func ServeAPI(ginServer *gin.Engine) {
 
 	ginServer.Handle("GET", "/api/system/bootProgress", bootProgress)
 	ginServer.Handle("POST", "/api/system/bootProgress", bootProgress)
+	ginServer.Handle("GET", "/api/system/bootProgressSSE", bootProgressSSE)
 	ginServer.Handle("GET", "/api/system/version", version)
 	ginServer.Handle("POST", "/api/system/version", version)
 	ginServer.Handle("POST", "/api/system/currentTime", currentTime)
@@ -227,6 +228,7 @@ func ServeAPI(ginServer *gin.Engine) {
 	ginServer.Handle("POST", "/api/block/getDocInfo", model.CheckAuth, getDocInfo)
 	ginServer.Handle("POST", "/api/block/getDocsInfo", model.CheckAuth, getDocsInfo)
 	ginServer.Handle("POST", "/api/block/checkBlockExist", model.CheckAuth, checkBlockExist)
+	ginServer.Handle("POST", "/api/block/checkBlocksExist", model.CheckAuth, checkBlocksExist)
 	ginServer.Handle("POST", "/api/block/getUnfoldedParentID", model.CheckAuth, getUnfoldedParentID)
 	ginServer.Handle("POST", "/api/block/checkBlockFold", model.CheckAuth, checkBlockFold)
 	ginServer.Handle("POST", "/api/block/insertBlock", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, insertBlock)
@@ -382,6 +384,10 @@ func ServeAPI(ginServer *gin.Engine) {
 	ginServer.Handle("POST", "/api/template/renderSprig", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, renderSprig)
 
 	ginServer.Handle("POST", "/api/transactions", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, performTransactions)
+	ginServer.Handle("POST", "/api/transactions/undoState", model.CheckAuth, model.CheckReadonly, undoState)
+	ginServer.Handle("POST", "/api/transactions/undo", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, performUndo)
+	ginServer.Handle("POST", "/api/transactions/redo", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, performRedo)
+	ginServer.Handle("POST", "/api/transactions/clearHistory", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, clearHistory)
 
 	ginServer.Handle("POST", "/api/setting/setAccount", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, setAccount)
 	ginServer.Handle("POST", "/api/setting/setEditor", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, setEditor)
@@ -499,6 +505,8 @@ func ServeAPI(ginServer *gin.Engine) {
 	ginServer.Handle("POST", "/api/av/searchAttributeViewNonRelationKey", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, deprecated) // TODO 请勿使用，该端点将于 2026 年 12 月 1 日后删除
 	ginServer.Handle("POST", "/api/av/searchAttributeViewRollupDestKeys", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, searchAttributeViewRollupDestKeys)
 	ginServer.Handle("POST", "/api/av/getAttributeViewFilterSort", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, getAttributeViewFilterSort)
+	ginServer.Handle("POST", "/api/av/setAttrViewFilters", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, setAttrViewFilters)
+	ginServer.Handle("POST", "/api/av/setAttrViewSorts", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, setAttrViewSorts)
 	ginServer.Handle("POST", "/api/av/addAttributeViewKey", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, addAttributeViewKey)
 	ginServer.Handle("POST", "/api/av/removeAttributeViewKey", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, removeAttributeViewKey)
 	ginServer.Handle("POST", "/api/av/sortAttributeViewViewKey", model.CheckAuth, model.CheckAdminRole, model.CheckReadonly, sortAttributeViewViewKey)

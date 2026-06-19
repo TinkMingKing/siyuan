@@ -28,6 +28,7 @@ import (
 
 	"github.com/88250/gulu"
 	"github.com/88250/lute/ast"
+	"github.com/goccy/go-json"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/siyuan-note/filelock"
 	"github.com/siyuan-note/logging"
@@ -329,7 +330,7 @@ func NewTableView() *View {
 	return &View{
 		ID:         ast.NewNodeID(),
 		Name:       GetAttributeViewI18n("table"),
-		Filters:    []*ViewFilter{},
+		Filters:    []*ViewFilter{{Combination: FilterCombinationAnd}},
 		Sorts:      []*ViewSort{},
 		PageSize:   ViewDefaultPageSize,
 		LayoutType: LayoutTypeTable,
@@ -342,7 +343,7 @@ func NewTableViewWithBlockKey(blockKeyID string) (view *View, blockKey, selectKe
 	view = &View{
 		ID:         ast.NewNodeID(),
 		Name:       name,
-		Filters:    []*ViewFilter{},
+		Filters:    []*ViewFilter{{Combination: FilterCombinationAnd}},
 		Sorts:      []*ViewSort{},
 		LayoutType: LayoutTypeTable,
 		Table:      NewLayoutTable(),
@@ -360,7 +361,7 @@ func NewGalleryView() (ret *View) {
 	return &View{
 		ID:         ast.NewNodeID(),
 		Name:       GetAttributeViewI18n("gallery"),
-		Filters:    []*ViewFilter{},
+		Filters:    []*ViewFilter{{Combination: FilterCombinationAnd}},
 		Sorts:      []*ViewSort{},
 		PageSize:   ViewDefaultPageSize,
 		LayoutType: LayoutTypeGallery,
@@ -372,7 +373,7 @@ func NewKanbanView() (ret *View) {
 	return &View{
 		ID:         ast.NewNodeID(),
 		Name:       GetAttributeViewI18n("kanban"),
-		Filters:    []*ViewFilter{},
+		Filters:    []*ViewFilter{{Combination: FilterCombinationAnd}},
 		Sorts:      []*ViewSort{},
 		PageSize:   ViewDefaultPageSize,
 		LayoutType: LayoutTypeKanban,
@@ -526,10 +527,10 @@ func ParseAttributeViewByPath(avJSONPath string) (ret *AttributeView, err error)
 	}
 
 	ret = &AttributeView{RenderedViewables: map[string]Viewable{}}
-	if err = gulu.JSON.UnmarshalJSON(data, ret); err != nil {
+	if err = json.Unmarshal(data, ret); err != nil {
 		if strings.Contains(err.Error(), ".relation.contents of type av.Value") {
 			mapAv := map[string]any{}
-			if err = gulu.JSON.UnmarshalJSON(data, &mapAv); err != nil {
+			if err = json.Unmarshal(data, &mapAv); err != nil {
 				logging.LogErrorf("unmarshal attribute view [%s] failed: %s", avID, err)
 				return
 			}
@@ -567,13 +568,13 @@ func ParseAttributeViewByPath(avJSONPath string) (ret *AttributeView, err error)
 				}
 			}
 
-			data, err = gulu.JSON.MarshalJSON(mapAv)
+			data, err = json.Marshal(mapAv)
 			if err != nil {
 				logging.LogErrorf("marshal attribute view [%s] failed: %s", avID, err)
 				return
 			}
 
-			if err = gulu.JSON.UnmarshalJSON(data, ret); err != nil {
+			if err = json.Unmarshal(data, ret); err != nil {
 				logging.LogErrorf("unmarshal attribute view [%s] failed: %s", avID, err)
 				return
 			}
@@ -581,6 +582,9 @@ func ParseAttributeViewByPath(avJSONPath string) (ret *AttributeView, err error)
 			logging.LogErrorf("unmarshal attribute view [%s] failed: %s", avID, err)
 			return
 		}
+	}
+	if nil == err {
+		err = CheckSpec(ret)
 	}
 	return
 }
@@ -834,9 +838,7 @@ func (av *AttributeView) Clone() (ret *AttributeView) {
 	for _, view := range ret.Views {
 		view.ID = ast.NewNodeID()
 
-		for _, f := range view.Filters {
-			f.Column = keyIDMap[f.Column]
-		}
+		remapFilterColumns(view.Filters, keyIDMap)
 		for _, s := range view.Sorts {
 			s.Column = keyIDMap[s.Column]
 		}
@@ -895,6 +897,8 @@ var (
 	ErrViewNotFound          = errors.New("view not found")
 	ErrKeyNotFound           = errors.New("key not found")
 	ErrWrongLayoutType       = errors.New("wrong layout type")
+	ErrSpecTooNew            = errors.New("attribute view spec is too new")
+	ErrFilterTooDeep         = errors.New("filter nesting depth exceeds the maximum allowed")
 )
 
 const (

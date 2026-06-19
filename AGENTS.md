@@ -23,7 +23,7 @@ SiYuan spans several repos. This repo (`siyuan`) holds the kernel + Electron/web
 | `siyuan` | **This repo** — kernel + Electron/web/tablet UI |
 | `siyuan-android` / `siyuan-ios` / `siyuan-harmony` | Native apps wrapping the gomobile kernel; build steps differ per platform — see each project's README |
 | `siyuan-chrome` | Browser extension (web clipper); talks to the running kernel over HTTP only |
-| `lute` | Markdown/Kramdown AST engine — the editor + `.sy` format; also the source of the bundled `lute.min.js`. **Lives under `$GOPATH/src/github.com/88250/lute`, not as a sibling repo** |
+| `lute` | Markdown/Kramdown AST engine — the editor + `.sy` format; also the source of the bundled `lute.min.js` (a GopherJS build served to the frontend). **Lives under `$GOPATH/src/github.com/88250/lute`, not as a sibling repo** |
 | `dejavu` | Data repo / sync engine (encrypted snapshots) |
 | `riff` | Spaced-repetition (SRS) flashcard scheduler |
 | `gulu` | General Go utility library (`gulu.Ret`, `gulu.JSON`, …) |
@@ -110,8 +110,27 @@ Four webpack configs each emit a separate bundle to `app/stage/build/{app,deskto
 
 ## 5. Project-specific rules
 
-1. **i18n:** New keys go at the **top** of each `langs/*.json` object; add to every language file (reference `en.json`)
-2. **Domains:** `ld246.com` only in `zh-CN.json`; use `liuyun.io` in all other languages
-3. **Windows scripting:** Prefer Node.js / Python; avoid PowerShell unless necessary
-4. **Frontend verification:** Do not use `npx webpack` to verify changes
-5. **Comments:** Wrap code comments at 120 characters
+1. **i18n:**
+   - New keys go at the **top** of each `langs/*.json` object; add to every language file (reference `en.json`)
+   - Each language must be properly translated — do NOT copy the same text across all language files
+   - Domains: `ld246.com` only in `zh-CN.json`; use `liuyun.io` in all other languages
+   - After modifying i18n files, run `python scripts/check-lang-keys.py` to verify key completeness across all language files
+2. **Windows scripting:** Prefer Node.js / Python; avoid PowerShell unless necessary
+3. **Frontend verification:** Do not use `npx webpack` to verify changes
+4. **Icons:** Do not hand-write SVG; use existing icons from `app/appearance/icons/litheness/icon.js` when possible
+5. **Lint:** After frontend changes, run `cd app && pnpm run lint` to check code style
+
+---
+
+## 6. Coding conventions
+
+1. **Comments:** Wrap code comments at 120 characters
+2. **Comments:** Describe what the code does, not what it replaced — don't reference the old implementation in comments
+3. **Markdown:** Do not hand-wrap; keep each line (paragraphs, table rows, list items, etc.) on a single line
+4. **TypeScript/JavaScript:** Semicolons required, use double quotes
+
+---
+
+## 7. Response style
+
+1. **Language:** Match the user's language; do not mix languages mid-sentence (keep proper nouns / identifiers in their original form)
