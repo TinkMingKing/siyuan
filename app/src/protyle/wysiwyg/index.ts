@@ -664,7 +664,9 @@ export class WYSIWYG {
                                         hasJump = true;
                                     }
                                 } else {
-                                    selectElements.push(currentElement);
+                                    if (!currentElement.classList.contains("sb__resize")) {
+                                        selectElements.push(currentElement);
+                                    }
                                     currentElement = currentElement.nextElementSibling as HTMLElement;
                                 }
                             } else if (currentElement.parentElement.classList.contains("sb")) {
@@ -1424,7 +1426,8 @@ export class WYSIWYG {
                                 }
                             } else {
                                 if (!currentElement.classList.contains("protyle-breadcrumb__bar") &&
-                                    !currentElement.classList.contains("protyle-breadcrumb__item")) {
+                                    !currentElement.classList.contains("protyle-breadcrumb__item") &&
+                                    !currentElement.classList.contains("sb__resize")) {
                                     selectElements.push(currentElement);
                                 }
                                 if (!currentElement.nextElementSibling && currentElement.parentElement.classList.contains("callout-content")) {
@@ -1899,6 +1902,9 @@ export class WYSIWYG {
             const range = getSelection().getRangeAt(0);
             if (this.element === range.startContainer || this.element.contains(range.startContainer)) {
                 protyle.toolbar.range = range.cloneRange();
+                // 失焦前保存滚动位置，供 zoomOut 在重载后恢复，防止浏览器焦点切换导致 scrollTop 归零
+                // https://github.com/siyuan-note/siyuan/issues/17886
+                (protyle as any).scrollTopBeforeBlur = protyle.contentElement.scrollTop;
             }
         });
 

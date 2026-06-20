@@ -1,4 +1,6 @@
 import {focusBlock, focusByRange, getRangeByPoint} from "./selection";
+import {getContenteditableElement, getParentBlock, getSbChildBlockCount, getTopAloneElement} from "../wysiwyg/getBlock";
+import {hideDragTip, showDragTip, transparentImgSrc} from "./dragTip";
 import {
     hasClosestBlock,
     hasClosestByAttribute,
@@ -9,9 +11,8 @@ import {
 } from "./hasClosest";
 import {Constants} from "../../constants";
 import {paste} from "./paste";
-import {cancelSB, genEmptyElement, genSBElement, getSbChildCount, insertEmptyBlock, refreshSbResize} from "../../block/util";
+import {cancelSB, genEmptyElement, genSBElement, insertEmptyBlock, refreshSbResize} from "../../block/util";
 import {transaction, turnsIntoOneTransaction} from "../wysiwyg/transaction";
-import {getParentBlock, getTopAloneElement} from "../wysiwyg/getBlock";
 import {updateListOrder} from "../wysiwyg/list";
 import {fetchPost, fetchSyncPost} from "../../util/fetch";
 import {onGet} from "./onGet";
@@ -40,6 +41,8 @@ import {dragoverTab} from "../render/av/view";
 import {setFold} from "./blockFold";
 
 // position: afterbegin 为拖拽成超级块; "afterend", "beforebegin" 一般拖拽
+
+// position: afterbegin 为拖拽成超级块; "afterend", "beforebegin" 一般拖拽
 const moveTo = async (protyle: IProtyle, sourceElements: Element[], targetElement: Element,
                       isSameDoc: boolean, position: InsertPosition, isCopy: boolean) => {
     const doOperations: IOperation[] = [];
@@ -64,7 +67,7 @@ const moveTo = async (protyle: IProtyle, sourceElements: Element[], targetElemen
     // 关键：对于文档顶层块，getParentBlock 返回 .protyle-wysiwyg 容器（无 data-node-id），
     // 不能用目标 protyle 的 rootID（跨文档拖拽时这是错误的文档），必须用源 DOM 所属文档 rootID。
     const sourcePositions = new Map<string, { previousID: string, parentID: string }>();
-    sourceElements.forEach(item => {
+    for (const item of sourceElements) {
         const id = item.getAttribute("data-node-id");
         if (id) {
             const parentBlock = getParentBlock(item);
@@ -74,11 +77,13 @@ const moveTo = async (protyle: IProtyle, sourceElements: Element[], targetElemen
                 // 通过 getAllEditor 反查 item 所属的源 protyle，取其 block.rootID。
                 const sourceEditor = getAllEditor().find(editor =>
                     editor.protyle.wysiwyg.element === parentBlock);
-                srcParentID = sourceEditor?.protyle?.block?.rootID || "";
-                if (!srcParentID) {
-                    // 兜底：找不到源编辑器时用目标 protyle 的 rootID（单文档场景正确，
-                    // 跨文档场景下虽不精确但优于空值导致 loadTree 失败）
-                    srcParentID = protyle.block.rootID;
+                if (sourceEditor?.protyle?.block?.rootID) {
+                    srcParentID = sourceEditor.protyle.block.rootID;
+                } else {
+                    // 跨窗口拖拽时 getAllEditor 找不到源编辑器，用 kernel API 反查块的真实 rootID。
+                    // 不能 fallback 到目标 protyle 的 rootID（会导致撤销把块移到错误文档）。
+                    const response = await fetchSyncPost("/api/block/getBlockInfo", {id});
+                    srcParentID = response?.data?.rootID || "";
                 }
             }
             sourcePositions.set(id, {
@@ -86,7 +91,7 @@ const moveTo = async (protyle: IProtyle, sourceElements: Element[], targetElemen
                 parentID: srcParentID || "",
             });
         }
-    });
+    }
     for (let index = sourceElements.length - 1; index >= 0; index--) {
         const item = sourceElements[index];
         const id = item.getAttribute("data-node-id");
@@ -217,7 +222,7 @@ const moveTo = async (protyle: IProtyle, sourceElements: Element[], targetElemen
                         sameElement.remove();
                     }
                 }
-                if (topSourceParentElement.classList.contains("sb") && getSbChildCount(topSourceParentElement) === 1) {
+                if (topSourceParentElement.classList.contains("sb") && getSbChildBlockCount(topSourceParentElement) === 1) {
                     // 拖拽后，sb 只剩下一个元素
                     if (isSameDoc) {
                         const sbData = await cancelSB(protyle, topSourceParentElement);
@@ -238,7 +243,7 @@ const moveTo = async (protyle: IProtyle, sourceElements: Element[], targetElemen
                         /// #endif
                     }
                 }
-            } else if (oldSourceParentElement.classList.contains("sb") && getSbChildCount(oldSourceParentElement) === 1) {
+            } else if (oldSourceParentElement.classList.contains("sb") && getSbChildBlockCount(oldSourceParentElement) === 1) {
                 // 拖拽后，sb 只剩下一个元素
                 if (isSameDoc) {
                     const sbData = await cancelSB(protyle, oldSourceParentElement);
@@ -463,7 +468,6 @@ const dragSb = async (protyle: IProtyle, sourceElements: Element[], targetElemen
         doOperations.push(...foldOperations.doOperations);
         undoOperations.splice(0, 0, ...foldOperations.undoOperations);
     });
-    // 子块移入完成后刷新拖拽手柄 https://github.com/siyuan-note/siyuan/issues/9521
     refreshSbResize(sbElement);
     if (isSameDoc || isCopy) {
         transaction(protyle, doOperations, undoOperations);
@@ -544,6 +548,15 @@ const dragSame = async (protyle: IProtyle, sourceElements: Element[], targetElem
             return true;
         }
     });
+    // 移入/移出超级块后刷新拖拽手柄（如 A 拖到超级块内 B 前面，需在 A、B 间补手柄）
+    const dragSbSet = new Set<Element>();
+    [newSourceParentElement[0], targetElement].forEach(el => {
+        const sb = el?.closest('[data-type="NodeSuperBlock"]');
+        if (sb) {
+            dragSbSet.add(sb);
+        }
+    });
+    dragSbSet.forEach(sb => refreshSbResize(sb));
     if (isSameDoc || isCopy) {
         transaction(protyle, doOperations, undoOperations);
     } else {
@@ -610,14 +623,20 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
                 ghostElement.append(cloneElement);
                 ghostElement.setAttribute("style", `position:fixed;opacity:.1;width:${target.parentElement.clientWidth}px;padding:0;`);
                 document.body.append(ghostElement);
-                event.dataTransfer.setDragImage(ghostElement, 0, 0);
                 if (window.siyuan.touchDragActive) {
+                    // 触屏保留 DOM ghost 供 touchDragBridge 跟随手指
+                    event.dataTransfer.setDragImage(ghostElement, 0, 0);
                     window.siyuan.touchDragGhost = ghostElement;
                 } else {
+                    // 桌面端隐藏原生 ghost，改用自定义双区跟随框
+                    const transparentImg = new Image();
+                    transparentImg.src = transparentImgSrc;
+                    event.dataTransfer.setDragImage(transparentImg, 0, 0);
                     setTimeout(() => {
                         ghostElement.remove();
                     });
                 }
+                window.siyuan.dragTitle = getContenteditableElement(target.parentElement)?.textContent?.trim() || "";
 
                 window.siyuan.dragElement = protyle.wysiwyg.element;
                 event.dataTransfer.setData(`${Constants.SIYUAN_DROP_GUTTER}NodeListItem${Constants.ZWSP}${target.parentElement.getAttribute("data-subtype")}${Constants.ZWSP}${[target.parentElement.getAttribute("data-node-id")]}`,
@@ -713,6 +732,8 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
     });
     editorElement.addEventListener("drop", async (event: DragEvent & { target: HTMLElement }) => {
         counter = 0;
+        hideDragTip();
+        window.siyuan.dragTitle = "";
         if (protyle.disabled || event.dataTransfer.getData(Constants.SIYUAN_DROP_EDITOR)) {
             // 只读模式/编辑器内选中文字拖拽
             event.preventDefault();
@@ -748,11 +769,12 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
             }
             return;
         }
-        const targetElement = editorElement.querySelector(".dragover__left, .dragover__right, .dragover__bottom, .dragover__top");
+        const targetElement = editorElement.querySelector(".dragover__left, .dragover__right, .dragover__bottom, .dragover__top, .dragover__bottom--sibling, .dragover__top--sibling, .dragover__bottom--child, .dragover__top--child");
         if (targetElement) {
             targetElement.classList.remove("dragover");
             targetElement.removeAttribute("select-start");
             targetElement.removeAttribute("select-end");
+            (targetElement as HTMLElement).style.backgroundColor = "";
         }
         if (gutterType) {
             // gutter 或反链面板拖拽
@@ -830,7 +852,13 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
                 hideElements(["gutter"], protyle);
 
                 const targetClass = targetElement.className.split(" ");
-                targetElement.classList.remove("dragover__bottom", "dragover__top", "dragover__left", "dragover__right");
+                targetElement.classList.remove("dragover__bottom", "dragover__top", "dragover__left", "dragover__right",
+                    "dragover__bottom--sibling", "dragover__top--sibling", "dragover__bottom--child", "dragover__top--child");
+                (targetElement as HTMLElement).style.removeProperty("--drag-indent");
+                (targetElement as HTMLElement).style.removeProperty("--drag-guides");
+                (targetElement as HTMLElement).style.removeProperty("--drag-line-left");
+                (targetElement as HTMLElement).style.removeProperty("--drag-base-bg");
+                (targetElement as HTMLElement).style.backgroundColor = "";
 
                 if (targetElement.classList.contains("av__cell")) {
                     const blockElement = hasClosestBlock(targetElement);
@@ -1034,31 +1062,44 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
                         }
                     }
                 } else if (sourceElements.length > 0) {
-                    if (targetElement.parentElement.getAttribute("data-type") === "NodeSuperBlock" &&
+                    const isChild = targetClass.some((c: string) => c.indexOf("--child") > -1);
+                    const isBottom = targetClass.some((c: string) => c.indexOf("dragover__bottom") === 0);
+
+                    if (isChild && targetElement.getAttribute("data-type") === "NodeListItem") {
+                        const nestedList = Array.from(targetElement.children).find(c => c.classList.contains("list"));
+                        let nestedTarget: Element;
+                        if (nestedList) {
+                            const liChildren = Array.from(nestedList.children).filter(c => c.classList.contains("li"));
+                            if (isBottom) {
+                                nestedTarget = liChildren.length > 0 ? liChildren[liChildren.length - 1] : null;
+                            } else {
+                                nestedTarget = liChildren.length > 0 ? liChildren[0] : null;
+                            }
+                        }
+                        if (nestedTarget) {
+                            dragSame(protyle, sourceElements, nestedTarget, isBottom, event.ctrlKey);
+                        } else {
+                            dragSame(protyle, sourceElements, targetElement, isBottom, event.ctrlKey);
+                        }
+                    } else if (targetElement.parentElement.getAttribute("data-type") === "NodeSuperBlock" &&
                         targetElement.parentElement.getAttribute("data-sb-layout") === "col") {
                         if (targetClass.includes("dragover__left") || targetClass.includes("dragover__right")) {
                             // Mac 上 ⌘ 无法进行拖拽
                             dragSame(protyle, sourceElements, targetElement, targetClass.includes("dragover__right"), event.ctrlKey);
                         } else {
-                            dragSb(protyle, sourceElements, targetElement, targetClass.includes("dragover__bottom"), "row", event.ctrlKey);
+                            dragSb(protyle, sourceElements, targetElement, isBottom, "row", event.ctrlKey);
                         }
                     } else {
                         if (targetClass.includes("dragover__left") || targetClass.includes("dragover__right")) {
                             dragSb(protyle, sourceElements, targetElement, targetClass.includes("dragover__right"), "col", event.ctrlKey);
                         } else {
-                            dragSame(protyle, sourceElements, targetElement, targetClass.includes("dragover__bottom"), event.ctrlKey);
+                            dragSame(protyle, sourceElements, targetElement, isBottom, event.ctrlKey);
                         }
                     }
 
                     // https://github.com/siyuan-note/siyuan/issues/10528#issuecomment-2205165824
                     editorElement.querySelectorAll(".protyle-wysiwyg--empty").forEach(item => {
                         item.classList.remove("protyle-wysiwyg--empty");
-                    });
-
-                    // 需重新渲染 https://github.com/siyuan-note/siyuan/issues/7574
-                    protyle.wysiwyg.element.querySelectorAll('[data-type="NodeBlockQueryEmbed"]').forEach(item => {
-                        item.removeAttribute("data-render");
-                        blockRender(protyle, item);
                     });
                 }
                 dragoverElement = undefined;
@@ -1249,14 +1290,18 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
             window.siyuan.dragElement.style.opacity = "";
             window.siyuan.dragElement = undefined;
         }
+        // Clean up all drag indicators unconditionally after drop/cancel
+        cleanupDragIndicators(document);
     });
     let dragoverElement: Element;
+    let dragCache: { nodeId: string, indent: number, rgb: { r: number, g: number, b: number }, guides: string };
     let disabledPosition: string;
     editorElement.addEventListener("dragover", (event: DragEvent & { target: HTMLElement }) => {
         if (protyle.disabled || event.dataTransfer.types.includes(Constants.SIYUAN_DROP_EDITOR)) {
             event.preventDefault();
             event.stopPropagation();
             event.dataTransfer.dropEffect = "none";
+            hideDragTip();
             return;
         }
         let gutterType = "";
@@ -1269,6 +1314,40 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
             dragoverTab(event);
             event.preventDefault();
             return;
+        }
+        // 解析 gutter 类型数组，区分普通块、AV 块、AV 子类型
+        const gutterTypes = gutterType ? gutterType.replace(Constants.SIYUAN_DROP_GUTTER, "").split(Constants.ZWSP) : [];
+        const isAvSubType = gutterTypes[0] === "nodeattributeviewrowmenu" ||
+            gutterTypes[0] === "nodeattributeviewrow" ||
+            (gutterTypes[0] === "nodeattributeview" && ["viewtab", "col", "galleryitem"].includes(gutterTypes[1] || ""));
+        // 操作提示：上半=操作对象名称，下半=操作文案
+        const isAvTarget = hasClosestByClassName(event.target, "av__row") ||
+            hasClosestByClassName(event.target, "av__row--util") ||
+            hasClosestByClassName(event.target, "av__gallery-item") ||
+            hasClosestByClassName(event.target, "av__gallery-add");
+        if (event.dataTransfer.types.includes(Constants.SIYUAN_DROP_FILE)) {
+            // 文档面板拖拽文档到编辑器
+            showDragTip(window.siyuan.dragTitle || "",
+                isAvTarget ? window.siyuan.languages.addToDatabase :
+                    (event.altKey ? window.siyuan.languages.dragTip2Heading : window.siyuan.languages.dragTipRef),
+                event.clientX, event.clientY);
+        } else if (gutterType && !isAvSubType) {
+            // 普通块（段落/标题/列表/引用/AV块等，排除 AV 行/列/视图/卡片）拖入编辑器
+            let action: string;
+            if (isAvTarget) {
+                // 拖到数据库视图：绑定为记录
+                action = window.siyuan.languages.addToDatabase;
+            } else if (event.altKey) {
+                // 编辑器内重排：Alt=插入引用，Shift=嵌入块，默认=移动
+                action = window.siyuan.languages.dragTipRef;
+            } else if (event.shiftKey) {
+                action = window.siyuan.languages.dragTipEmbed;
+            } else {
+                action = window.siyuan.languages.move;
+            }
+            showDragTip(window.siyuan.dragTitle || "", action, event.clientX, event.clientY);
+        } else {
+            hideDragTip();
         }
         let targetElement: HTMLElement | false;
         // 设置了的话 drop 就无法监听 shift/control event.dataTransfer.dropEffect = "move";
@@ -1299,7 +1378,6 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
             event.preventDefault();
             return;
         }
-        const gutterTypes = gutterType ? gutterType.replace(Constants.SIYUAN_DROP_GUTTER, "").split(Constants.ZWSP) : [];
         const fileTreeIds = (event.dataTransfer.types.includes(Constants.SIYUAN_DROP_FILE) && window.siyuan.dragElement) ? window.siyuan.dragElement.innerText : "";
         if (event.shiftKey || (event.altKey && fileTreeIds.indexOf("-") === -1)) {
             const targetAssetElement = hasClosestBlock(event.target);
@@ -1464,11 +1542,15 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
             !targetElement.classList.contains("av__row--util") &&
             !targetElement.classList.contains("av__gallery-item") &&
             !targetElement.classList.contains("av__gallery-add");
+        // For list items, resolve to the .li ancestor (but keep targetElement for validation)
+        const liTarget = targetElement.getAttribute("data-type") === "NodeListItem"
+            ? targetElement : targetElement.parentElement?.getAttribute("data-type") === "NodeListItem"
+                ? targetElement.parentElement : null;
         if (targetElement && dragoverElement && targetElement === dragoverElement) {
             // 性能优化，目标为同一个元素不再进行校验
             const nodeRect = targetElement.getBoundingClientRect();
-            editorElement.querySelectorAll(".dragover__left, .dragover__right, .dragover__bottom, .dragover__top, .dragover").forEach((item: HTMLElement) => {
-                item.classList.remove("dragover__top", "dragover__bottom", "dragover__left", "dragover__right", "dragover");
+            cleanupDragIndicators(editorElement);
+            editorElement.querySelectorAll("[select-start], [select-end]").forEach((item: HTMLElement) => {
                 item.removeAttribute("select-start");
                 item.removeAttribute("select-end");
             });
@@ -1489,14 +1571,40 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
                 return;
             }
             // 忘记为什么要限定文档树的拖拽了，先放开 https://github.com/siyuan-note/siyuan/pull/13284#issuecomment-2503853135
-            if (targetElement.getAttribute("data-type") === "NodeListItem") {
-                if (event.clientY > nodeRect.top + nodeRect.height / 2) {
-                    targetElement.classList.add("dragover__bottom");
-                    addDragover(targetElement);
-                } else if (!targetElement.classList.contains("av__row--header")) {
-                    targetElement.classList.add("dragover__top");
-                    addDragover(targetElement);
+            if (liTarget) {
+                const htmlTarget = liTarget as HTMLElement;
+                const nodeId = htmlTarget.getAttribute("data-node-id");
+                // Cache expensive computations per target element (never changes while hovering same element)
+                if (!dragCache || dragCache.nodeId !== nodeId) {
+                    const contentBlock = Array.from(liTarget.children).find(c => c.hasAttribute("data-node-id")) as HTMLElement;
+                    const indent = contentBlock ? parseFloat(getComputedStyle(contentBlock).marginLeft) || 34 : 34;
+                    const depth = getListDepth(liTarget);
+                    const computedColor = getComputedStyle(liTarget).getPropertyValue("--b3-theme-primary-lighter").trim();
+                    const rgb = parseHexColor(computedColor) || {r: 53, g: 115, b: 217};
+                    let siblingGuides = "";
+                    for (let n = 1; n <= depth; n++) {
+                        if (siblingGuides) siblingGuides += ", ";
+                        const opacity = depth <= 1 ? 0.55 : 1 - (n - 1) / (depth - 1) * 0.65;
+                        siblingGuides += `${-n * indent}px 0 0 0 rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacity.toFixed(2)})`;
+                    }
+                    dragCache = {nodeId, indent, rgb, guides: siblingGuides || "none"};
                 }
+                const {indent, rgb, guides} = dragCache;
+
+                const liRect = htmlTarget.getBoundingClientRect();
+                const isRTL = getComputedStyle(htmlTarget).direction === "rtl";
+                const offsetX = isRTL ? (liRect.right - event.clientX) : (event.clientX - liRect.left);
+                const isChild = offsetX >= indent;
+                const position = event.clientY > liRect.top + liRect.height / 2 ? "bottom" : "top";
+                const className = `dragover__${position}--${isChild ? "child" : "sibling"}`;
+
+                htmlTarget.classList.add(className);
+                htmlTarget.style.setProperty("--drag-indent", `${indent}px`);
+                htmlTarget.style.setProperty("--drag-line-left", isChild ? `${indent}px` : "0");
+                htmlTarget.style.setProperty("--drag-guides", guides);
+                htmlTarget.style.setProperty("--drag-base-bg",
+                    isChild ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 1)` : "transparent");
+                highlightByLevel(editorElement, htmlTarget);
                 return;
             }
 
@@ -1572,8 +1680,8 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
         if (fileTreeIds.indexOf("-") > -1) {
             if (fileTreeIds.split(",").includes(protyle.block.rootID) && isNotAvItem && event.altKey) {
                 dragoverElement = undefined;
-                editorElement.querySelectorAll(".dragover__left, .dragover__right, .dragover__bottom, .dragover__top, .dragover").forEach((item: HTMLElement) => {
-                    item.classList.remove("dragover__top", "dragover__bottom", "dragover__left", "dragover__right", "dragover");
+                cleanupDragIndicators(editorElement);
+                editorElement.querySelectorAll("[select-start], [select-end]").forEach((item: HTMLElement) => {
                     item.removeAttribute("select-start");
                     item.removeAttribute("select-end");
                 });
@@ -1661,10 +1769,9 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
         }
         counter--;
         if (counter === 0) {
-            editorElement.querySelectorAll(".dragover__left, .dragover__right, .dragover__bottom, .dragover__top, .dragover").forEach((item: HTMLElement) => {
-                item.classList.remove("dragover__top", "dragover__bottom", "dragover__left", "dragover__right", "dragover");
-            });
+            cleanupDragIndicators(editorElement);
             dragoverElement = undefined;
+            hideDragTip();
         }
     });
     editorElement.addEventListener("dragenter", (event) => {
@@ -1677,7 +1784,77 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
             window.siyuan.dragElement = undefined;
             document.onmousemove = null;
         }
+        // Clean up all drag indicators on cancel
+        cleanupDragIndicators(editorElement);
+        dragoverElement = undefined;
+        hideDragTip();
+        window.siyuan.dragTitle = "";
     });
+    // Fallback: document-level cleanup in case dragend doesn't bubble
+    document.addEventListener("dragend", () => {
+        cleanupDragIndicators(document);
+    }, {once: true});
+};
+
+const cleanupDragIndicators = (scope: ParentNode) => {
+    scope.querySelectorAll(".dragover__top, .dragover__bottom, .dragover__left, .dragover__right, .dragover__top--sibling, .dragover__bottom--sibling, .dragover__top--child, .dragover__bottom--child, .dragover, [style*=\"--drag-indent\"]").forEach((item: HTMLElement) => {
+        item.classList.remove("dragover__top", "dragover__bottom", "dragover__left", "dragover__right", "dragover",
+            "dragover__top--sibling", "dragover__bottom--sibling", "dragover__top--child", "dragover__bottom--child");
+        item.style.removeProperty("--drag-indent");
+        item.style.removeProperty("--drag-guides");
+        item.style.removeProperty("--drag-line-left");
+        item.style.removeProperty("--drag-base-bg");
+        item.style.backgroundColor = "";
+    });
+};
+
+const getListDepth = (liElement: Element): number => {
+    let depth = 0;
+    let list = liElement.parentElement;
+    while (list && list.classList.contains("list")) {
+        const parentLi = list.parentElement;
+        if (parentLi && parentLi.classList.contains("li")) {
+            depth++;
+            list = parentLi.parentElement;
+        } else {
+            break;
+        }
+    }
+    return depth;
+};
+
+const parseHexColor = (color: string): { r: number, g: number, b: number } | null => {
+    if (!color) return null;
+    const hexMatch = color.match(/^#([0-9a-f]{3,8})$/i);
+    if (hexMatch) {
+        let hex = hexMatch[1];
+        if (hex.length === 3) {
+            hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+        }
+        if (hex.length >= 6) {
+            return {
+                r: parseInt(hex.slice(0, 2), 16),
+                g: parseInt(hex.slice(2, 4), 16),
+                b: parseInt(hex.slice(4, 6), 16),
+            };
+        }
+    }
+    const rgbMatch = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    if (rgbMatch) {
+        return {
+            r: parseInt(rgbMatch[1]),
+            g: parseInt(rgbMatch[2]),
+            b: parseInt(rgbMatch[3]),
+        };
+    }
+    return null;
+};
+
+const highlightByLevel = (editorElement: HTMLElement, liElement: HTMLElement) => {
+    editorElement.querySelectorAll(".dragover").forEach((item: HTMLElement) => {
+        item.classList.remove("dragover");
+    });
+    liElement.classList.add("dragover");
 };
 
 const addDragover = (element: HTMLElement) => {
@@ -1692,7 +1869,12 @@ const addDragover = (element: HTMLElement) => {
 // https://github.com/siyuan-note/siyuan/issues/12651
 const clearDragoverElement = (element: Element) => {
     if (element) {
-        element.classList.remove("dragover__top", "dragover__bottom", "dragover__left", "dragover__right", "dragover");
+        element.classList.remove("dragover__top", "dragover__bottom", "dragover", "dragover__left", "dragover__right", "dragover__top--sibling", "dragover__bottom--sibling", "dragover__top--child", "dragover__bottom--child");
+        (element as HTMLElement).style.removeProperty("--drag-indent");
+        (element as HTMLElement).style.removeProperty("--drag-guides");
+        (element as HTMLElement).style.removeProperty("--drag-line-left");
+        (element as HTMLElement).style.removeProperty("--drag-base-bg");
+        (element as HTMLElement).style.backgroundColor = "";
         element = undefined;
     }
 };

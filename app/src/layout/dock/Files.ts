@@ -32,6 +32,7 @@ import {ipcRenderer} from "electron";
 /// #endif
 import {hideTooltip, showTooltip} from "../../dialog/tooltip";
 import {selectOpenTab} from "./util";
+import {hideDragTip, showDragTip, transparentImgSrc} from "../../protyle/util/dragTip";
 
 export class Files extends Model {
     public element: HTMLElement;
@@ -401,18 +402,24 @@ export class Files extends Model {
                 ghostElement.setAttribute("style", `width: 219px;position: fixed;top:-${selectElements.length * 30}px`);
                 ghostElement.setAttribute("class", "b3-list b3-list--background");
                 document.body.append(ghostElement);
-                event.dataTransfer.setDragImage(ghostElement, 16, 16);
-                event.dataTransfer.setData(Constants.SIYUAN_DROP_FILE, ids);
-                event.dataTransfer.dropEffect = "move";
-                window.siyuan.dragElement = document.createElement("div");
-                window.siyuan.dragElement.innerText = ids;
                 if (window.siyuan.touchDragActive) {
+                    // 触屏保留 DOM ghost 供 touchDragBridge 跟随手指
+                    event.dataTransfer.setDragImage(ghostElement, 16, 16);
                     window.siyuan.touchDragGhost = ghostElement;
                 } else {
+                    // 桌面端隐藏原生 ghost，改用自定义双区跟随框
+                    const transparentImg = new Image();
+                    transparentImg.src = transparentImgSrc;
+                    event.dataTransfer.setDragImage(transparentImg, 0, 0);
                     setTimeout(() => {
                         ghostElement.remove();
                     });
                 }
+                event.dataTransfer.setData(Constants.SIYUAN_DROP_FILE, ids);
+                event.dataTransfer.dropEffect = "move";
+                window.siyuan.dragTitle = (selectElements[0] as HTMLElement)?.querySelector(".b3-list-item__text")?.textContent?.trim() || "";
+                window.siyuan.dragElement = document.createElement("div");
+                window.siyuan.dragElement.innerText = ids;
             }
         });
         const dragOverLastObj: {
@@ -449,6 +456,8 @@ export class Files extends Model {
                 }
             });
             window.siyuan.dragElement = undefined;
+            hideDragTip();
+            window.siyuan.dragTitle = "";
             /// #if !BROWSER
             ipcRenderer.send(Constants.SIYUAN_SEND_WINDOWS, {cmd: "resetTabsStyle", data: "rmDragStyle"});
             /// #else
@@ -472,6 +481,15 @@ export class Files extends Model {
                     gutterType = item.type;
                 }
             }
+            // 标题/列表项等块标源拖到文档树的提示在下方 rAF 回调中根据高亮类判定
+            // 其余无法转换的块标源（如段落）不显示提示
+            if (gutterType) {
+                const gutterTypes = gutterType.replace(Constants.SIYUAN_DROP_GUTTER, "").split(Constants.ZWSP);
+                if (!["nodelistitem", "nodeheading"].includes(gutterTypes[0])) {
+                    hideDragTip();
+                }
+            }
+            // 文档→文档拖拽的提示在下方 rAF 回调中根据高亮类判定（需等高亮类确定后再显示）
             dragOverLastObj.rafId = requestAnimationFrame(() => {
                 dragOverLastObj.rafId = null;
                 let liElement = event.target.closest("li");
@@ -480,6 +498,7 @@ export class Files extends Model {
                 }
                 if (!liElement) {
                     dragOverLastObj.element = null;
+                    hideDragTip();
                     event.preventDefault();
                     return;
                 }
@@ -495,6 +514,7 @@ export class Files extends Model {
                         }
                     } else if (liElement.classList.contains("b3-list-item--focus")) {
                         // 选中的文档不能拖拽到自己上，但允许标题拖拽到文档树的选中文档上 https://github.com/siyuan-note/siyuan/issues/6552
+                        hideDragTip();
                         event.preventDefault();
                         return;
                     }
@@ -510,6 +530,7 @@ export class Files extends Model {
                         }
                     }
                     if (dragOverLastObj.sourceOnlyRoot && targetType !== "navigation-root") {
+                        hideDragTip();
                         event.preventDefault();
                         return;
                     }
@@ -517,6 +538,7 @@ export class Files extends Model {
                 if (dragOverLastObj.element && dragOverLastObj.element === liElement && dragOverLastObj.positionY !== event.clientY) {
                     const notebookElement = hasClosestByAttribute(liElement, "data-sortmode", null);
                     if (!notebookElement) {
+                        hideDragTip();
                         event.preventDefault();
                         return;
                     }
@@ -551,6 +573,36 @@ export class Files extends Model {
                     dragOverLastObj.element = liElement;
                 }
                 dragOverLastObj.positionY = event.clientY;
+                // 文档→文档拖拽：依据当前高亮类显示对应操作提示（带目标文档名）
+                if (!gutterType) {
+                    const name = liElement.querySelector(".b3-list-item__text")?.textContent || "";
+                    const title = window.siyuan.dragTitle || "";
+                    if (liElement.classList.contains("dragover__top")) {
+                        showDragTip(title, window.siyuan.languages.dragTipMoveBefore.replace("${x}", name), event.clientX, event.clientY);
+                    } else if (liElement.classList.contains("dragover__bottom")) {
+                        showDragTip(title, window.siyuan.languages.dragTipMoveAfter.replace("${x}", name), event.clientX, event.clientY);
+                    } else if (liElement.classList.contains("dragover")) {
+                        showDragTip(title, window.siyuan.languages.dragTipMoveChild.replace("${x}", name), event.clientX, event.clientY);
+                    } else {
+                        hideDragTip();
+                    }
+                } else {
+                    // 块标（标题/列表项）→文档树：结合“转换为文档”和位置（带目标文档名）
+                    const gutterTypes = gutterType.replace(Constants.SIYUAN_DROP_GUTTER, "").split(Constants.ZWSP);
+                    if (["nodelistitem", "nodeheading"].includes(gutterTypes[0])) {
+                        const name = liElement.querySelector(".b3-list-item__text")?.textContent || "";
+                        const title = window.siyuan.dragTitle || "";
+                        let action: string;
+                        if (liElement.classList.contains("dragover__top")) {
+                            action = window.siyuan.languages.dragTip2DocBefore.replace("${x}", name);
+                        } else if (liElement.classList.contains("dragover__bottom")) {
+                            action = window.siyuan.languages.dragTip2DocAfter.replace("${x}", name);
+                        } else {
+                            action = window.siyuan.languages.dragTip2DocChild.replace("${x}", name);
+                        }
+                        showDragTip(title, action, event.clientX, event.clientY);
+                    }
+                }
                 event.preventDefault();
             });
             event.preventDefault();
@@ -562,6 +614,7 @@ export class Files extends Model {
                 this.element.querySelectorAll(".dragover, .dragover__bottom, .dragover__top").forEach((item: HTMLElement) => {
                     item.classList.remove("dragover", "dragover__bottom", "dragover__top");
                 });
+                hideDragTip();
             }
         });
         this.element.addEventListener("dragenter", (event) => {
@@ -570,6 +623,8 @@ export class Files extends Model {
         });
         this.element.addEventListener("drop", async (event: DragEvent & { target: HTMLElement }) => {
             counter = 0;
+            hideDragTip();
+            window.siyuan.dragTitle = "";
             const newElement = this.element.querySelector(".dragover, .dragover__bottom, .dragover__top");
             if (!newElement) {
                 return;

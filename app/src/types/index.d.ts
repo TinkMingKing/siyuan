@@ -267,8 +267,8 @@ interface Window {
         }
     };
     htmlToImage: {
-        toCanvas: (element: Element) => Promise<HTMLCanvasElement>
-        toBlob: (element: Element) => Promise<Blob>
+        toCanvas: (element: Element, options?: Partial<IObject>) => Promise<HTMLCanvasElement>
+        toBlob: (element: Element, options?: Partial<IObject>) => Promise<Blob>
     };
     siyuan: ISiyuan;
     JSAndroid: {
@@ -577,6 +577,7 @@ interface ISiyuan {
         }[]
     },
     dragElement?: HTMLElement,
+    dragTitle?: string,
     currentDragOverTabHeadersElement?: HTMLElement
     touchDragActive?: boolean,
     touchDragGhost?: HTMLElement | null,

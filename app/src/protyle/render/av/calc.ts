@@ -5,6 +5,7 @@ import {fetchSyncPost} from "../../../util/fetch";
 import {getFieldsByData} from "./view";
 import {Constants} from "../../../constants";
 import {Dialog} from "../../../dialog";
+import {escapeAttr} from "../../../util/escape";
 
 const calcItem = (options: {
     menu: Menu,
@@ -449,9 +450,10 @@ export const openCalcMenu = async (protyle: IProtyle, calcElement: HTMLElement, 
         const colData = getFieldsByData(avResponse.data).find((item) => item.id === colId);
         currentTemplate = colData?.calc?.template || "";
     }
-    // 提交模板统计：将底部计算切换为 Template 并写入模板内容
+    // 提交模板统计：将底部计算切换为 Template 并写入模板内容；模板为空时恢复为“无”
     const submitTemplate = (templateContent: string) => {
-        const doData: IAVCalc = {operator: "Template", template: templateContent};
+        const isEmpty = "" === templateContent.trim();
+        const doData: IAVCalc = isEmpty ? {operator: ""} : {operator: "Template", template: templateContent};
         const undoData: IAVCalc = {operator: oldOperator || ""};
         if (oldOperator === "Template" && currentTemplate) {
             undoData.template = currentTemplate;
@@ -478,7 +480,7 @@ export const openCalcMenu = async (protyle: IProtyle, calcElement: HTMLElement, 
             const dialog = new Dialog({
                 title: window.siyuan.languages.calcOperatorTemplate,
                 content: `<div class="b3-dialog__content">
-    <textarea spellcheck="false" class="fn__block b3-text-field" placeholder="${window.siyuan.languages.rollupTemplateTip}" rows="8" style="resize: vertical;font-family: var(--b3-font-family-code);">${currentTemplate}</textarea>
+    <textarea spellcheck="false" class="fn__block b3-text-field" placeholder="${escapeAttr(window.siyuan.languages.rollupTemplateTip)}" rows="8" style="resize: vertical;font-family: var(--b3-font-family-code);">${currentTemplate}</textarea>
 </div>
 <div class="b3-dialog__action">
     <button class="b3-button b3-button--cancel">${window.siyuan.languages.cancel}</button><div class="fn__space"></div>

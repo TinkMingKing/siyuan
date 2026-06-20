@@ -39,6 +39,7 @@ import {getContenteditableElement, getParentBlock, getTopAloneElement, isNotEdit
 import * as dayjs from "dayjs";
 import {fetchPost} from "../../util/fetch";
 import {cancelSB, genEmptyElement, getLangByType, insertEmptyBlock, jumpToParent,} from "../../block/util";
+import {transparentImgSrc} from "../util/dragTip";
 import {countBlockWord} from "../../layout/status";
 import {Constants} from "../../constants";
 import {mathRender} from "../render/mathRender";
@@ -174,13 +175,34 @@ export class Gutter {
             });
             ghostElement.setAttribute("style", `position:fixed;opacity:.1;width:${selectElements[0].clientWidth}px;padding:0;`);
             document.body.append(ghostElement);
-            event.dataTransfer.setDragImage(ghostElement, 0, 0);
-            if (window.siyuan.touchDragActive) {
-                window.siyuan.touchDragGhost = ghostElement;
-            } else {
+            // 普通块（段落/标题/列表块/引用块等）拖拽时隐藏原生 ghost 并改用自定义双区跟随框；AV 行保留原生 ghost
+            const isBlockDrag = !buttonElement.dataset.rowId;
+            if (isBlockDrag && !window.siyuan.touchDragActive) {
+                const transparentImg = new Image();
+                transparentImg.src = transparentImgSrc;
+                event.dataTransfer.setDragImage(transparentImg, 0, 0);
                 setTimeout(() => {
                     ghostElement.remove();
                 });
+            } else {
+                event.dataTransfer.setDragImage(ghostElement, 0, 0);
+                if (window.siyuan.touchDragActive) {
+                    window.siyuan.touchDragGhost = ghostElement;
+                } else {
+                    setTimeout(() => {
+                        ghostElement.remove();
+                    });
+                }
+            }
+            if (isBlockDrag) {
+                const text = getContenteditableElement(selectElements[0] as HTMLElement)?.textContent?.trim() || "";
+                // 数据库块若无标题，优先用当前视图名，最后兜底为"数据库"
+                let title = text;
+                if (!title && buttonElement.getAttribute("data-type") === "NodeAttributeView") {
+                    title = (selectElements[0] as HTMLElement)?.querySelector(".av__views .item--focus")?.textContent?.trim() ||
+                        window.siyuan.languages.database;
+                }
+                window.siyuan.dragTitle = title;
             }
             buttonElement.style.opacity = "0.38";
             window.siyuan.dragElement = avElement as HTMLElement || protyle.wysiwyg.element;
@@ -192,6 +214,7 @@ export class Gutter {
                 item.style.opacity = "";
             });
             window.siyuan.dragElement = undefined;
+            window.siyuan.dragTitle = "";
         });
         this.element.addEventListener("click", (event: MouseEvent & { target: HTMLInputElement }) => {
             const buttonElement = hasClosestByTag(event.target, "BUTTON");
