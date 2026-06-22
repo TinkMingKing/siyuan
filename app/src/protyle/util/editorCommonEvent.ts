@@ -492,12 +492,8 @@ const dragSb = async (protyle: IProtyle, sourceElements: Element[], targetElemen
     originSbSet.forEach(sb => {
         refreshSbAndPersistWidth(sb, doOperations, undoOperations);
     });
-    if (isSameDoc || isCopy) {
-        transaction(protyle, doOperations, undoOperations);
-    } else {
-        // 跨文档移动为可逆条目：全局撤销栈按 rootID 分栈联动，撤销时经 mutatedRootIDs 判定弹确认
-        transaction(protyle, doOperations, undoOperations);
-    }
+    // 跨文档移动为可逆条目：全局撤销栈按 rootID 分栈联动，撤销时经 mutatedRootIDs 判定弹确认
+    transaction(protyle, doOperations, undoOperations);
     if (document.contains(sourceElements[0])) {
         focusBlock(sourceElements[0]);
     } else {
@@ -590,23 +586,23 @@ const dragSame = async (protyle: IProtyle, sourceElements: Element[], targetElem
     dragSbSet.forEach(sb => {
         refreshSbAndPersistWidth(sb, doOperations, undoOperations);
     });
-    if (isSameDoc || isCopy) {
-        transaction(protyle, doOperations, undoOperations);
-    } else {
-        // 跨文档移动为可逆条目：全局撤销栈按 rootID 分栈联动，撤销时经 mutatedRootIDs 判定弹确认
-        transaction(protyle, doOperations, undoOperations);
-    }
     if ((newSourceParentElement.length > 1 || hasFoldHeading) &&
         newSourceParentElement[0].parentElement.classList.contains("sb") &&
         newSourceParentElement[0].parentElement.getAttribute("data-sb-layout") === "col") {
-        turnsIntoOneTransaction({
+        // 合并到同一个 transaction，避免新超级块 id 在第二个 transaction 中找不到
+        const mergeOperations = await turnsIntoOneTransaction({
             protyle,
             selectsElement: newSourceParentElement.reverse(),
             type: "BlocksMergeSuperBlock",
             level: "row",
             unfocus: true,
+            getOperations: true
         });
+        doOperations.push(...mergeOperations.doOperations);
+        undoOperations.splice(0, 0, ...mergeOperations.undoOperations);
     }
+    // 跨文档移动为可逆条目：全局撤销栈按 rootID 分栈联动，撤销时经 mutatedRootIDs 判定弹确认
+    transaction(protyle, doOperations, undoOperations);
     if (document.contains(sourceElements[0])) {
         focusBlock(sourceElements[0]);
     } else {
@@ -1665,7 +1661,8 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
                     let siblingGuides = "";
                     for (let n = 1; n <= depth; n++) {
                         if (siblingGuides) siblingGuides += ", ";
-                        const opacity = depth <= 1 ? 0.55 : 1 - (n - 1) / (depth - 1) * 0.65;
+                        // guide 竖线透明度从 0.5（最近）渐变到 0.1（最远），均低于插入线（0.6）以突出目标位置
+                        const opacity = depth <= 1 ? 0.3 : 0.5 - (n - 1) / (depth - 1) * 0.4;
                         siblingGuides += `${-n * indent}px 0 0 0 rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacity.toFixed(2)})`;
                     }
                     dragCache = {nodeId, indent, rgb, guides: siblingGuides || "none"};
@@ -1675,16 +1672,27 @@ export const dropEvent = (protyle: IProtyle, editorElement: HTMLElement) => {
                 const liRect = htmlTarget.getBoundingClientRect();
                 const isRTL = getComputedStyle(htmlTarget).direction === "rtl";
                 const offsetX = isRTL ? (liRect.right - event.clientX) : (event.clientX - liRect.left);
-                const isChild = offsetX >= indent;
-                const position = event.clientY > liRect.top + liRect.height / 2 ? "bottom" : "top";
+                const isBottom = event.clientY > liRect.top + liRect.height / 2;
+                // 列表项统一使用底部插入点；但列表首项的上半需保留顶部插入点，否则无法在列表最前面插入
+                const isFirstLi = !htmlTarget.previousElementSibling || !htmlTarget.previousElementSibling.classList.contains("li");
+                let position = "bottom";
+                if (isFirstLi && !isBottom) {
+                    position = "top";
+                }
+                const isChild = position === "bottom" && offsetX >= indent;
                 const className = `dragover__${position}--${isChild ? "child" : "sibling"}`;
 
                 htmlTarget.classList.add(className);
                 htmlTarget.style.setProperty("--drag-indent", `${indent}px`);
                 htmlTarget.style.setProperty("--drag-line-left", isChild ? `${indent}px` : "0");
-                htmlTarget.style.setProperty("--drag-guides", guides);
+                // 仅在成为子项时显示层级 guide 竖线；同级插入时清除，避免横线覆盖后短线残留导致颜色重叠
+                htmlTarget.style.setProperty("--drag-guides", isChild ? guides : "none");
+                // ::before 目标标记仅在成为子项时显示，sibling 时由横线独占该区域避免半透明叠加变深
                 htmlTarget.style.setProperty("--drag-base-bg",
-                    isChild ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 1)` : "transparent");
+                    isChild ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)` : "transparent");
+                // 横向插入线使用独立颜色，始终显示
+                htmlTarget.style.setProperty("--drag-line-bg",
+                    `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.6)`);
                 highlightByLevel(editorElement, htmlTarget);
                 // Update drag tip to show specific insertion position
                 const targetText = (getContenteditableElement(htmlTarget)?.textContent?.trim() || "").slice(0, 20);
@@ -1944,6 +1952,7 @@ const cleanupDragIndicators = (scope: ParentNode) => {
         item.style.removeProperty("--drag-guides");
         item.style.removeProperty("--drag-line-left");
         item.style.removeProperty("--drag-base-bg");
+        item.style.removeProperty("--drag-line-bg");
     });
 };
 

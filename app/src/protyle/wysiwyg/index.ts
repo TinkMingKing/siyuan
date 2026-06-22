@@ -803,6 +803,10 @@ export class WYSIWYG {
                     !nextElement || sbElement.getAttribute("data-sb-layout") !== "col") {
                     return;
                 }
+                const oldHTMLs = {
+                    prev: previousElement.outerHTML,
+                    next: nextElement.outerHTML,
+                };
                 const x = event.clientX;
                 const sbWidth = sbElement.clientWidth;
                 // 使用 getBoundingClientRect 获取精确浮点宽度，避免 clientWidth（整数取整）作为
@@ -813,9 +817,6 @@ export class WYSIWYG {
                 const handleStyle = getComputedStyle(target);
                 const gapPx = target.offsetWidth + parseFloat(handleStyle.marginLeft) + parseFloat(handleStyle.marginRight);
                 const minWidth = 20;
-                target.classList.add("sb__resize--drag");
-                // 拖拽时禁止换行，避免最后一个子块因宽度溢出而换行
-                sbElement.style.flexWrap = "nowrap";
                 // @ts-ignore
                 previousElement.style.webkitUserModify = "read-only";
                 // @ts-ignore
@@ -845,9 +846,7 @@ export class WYSIWYG {
                     nextElement.style.width = newRightWidth + "px";
                     nextElement.style.flex = "none";
                 };
-                documentSelf.onmouseup = () => {
-                    target.classList.remove("sb__resize--drag");
-                    sbElement.style.flexWrap = "";
+                documentSelf.onmouseup = (mouseupEvent) => {
                     // @ts-ignore
                     previousElement.style.webkitUserModify = "";
                     // @ts-ignore
@@ -857,8 +856,10 @@ export class WYSIWYG {
                     documentSelf.ondragstart = null;
                     documentSelf.onselectstart = null;
                     documentSelf.onselect = null;
-                    const sbChildren = Array.from(sbElement.querySelectorAll(":scope > [data-node-id]")) as HTMLElement[];
-                    const oldHTMLs = sbChildren.map(c => c.outerHTML);
+                    // 仅点击未拖拽，不产生 transaction，避免无意义的更新
+                    if (Math.abs(x - mouseupEvent.clientX) <= 0) {
+                        return;
+                    }
                     // 只调整左右两块（手柄两侧），其他子块不动，避免影响未拖拽的块
                     // 使用 mousemove 记录的精确实时宽度（finalLeft/finalRight）反推百分比，
                     // gapHalve 已含 +1px 余量防止亚像素换行，无需再用 *99 缩放（会造成累积收缩）
@@ -877,8 +878,18 @@ export class WYSIWYG {
                     nextElement.style.width = `calc(${rightPct}% - ${gapHalve}px)`;
                     previousElement.setAttribute("updated", updated);
                     nextElement.setAttribute("updated", updated);
-                    updateTransaction(protyle, previousElement, oldHTMLs[sbChildren.indexOf(previousElement)]);
-                    updateTransaction(protyle, nextElement, oldHTMLs[sbChildren.indexOf(nextElement)]);
+                    // 合并为单个 transaction，确保撤销时两侧宽度同时恢复
+                    transaction(protyle, [
+                        {
+                            action: "update",
+                            id: previousElement.getAttribute("data-node-id"),
+                            data: previousElement.outerHTML
+                        },
+                        {action: "update", id: nextElement.getAttribute("data-node-id"), data: nextElement.outerHTML},
+                    ], [
+                        {action: "update", id: previousElement.getAttribute("data-node-id"), data: oldHTMLs.prev},
+                        {action: "update", id: nextElement.getAttribute("data-node-id"), data: oldHTMLs.next},
+                    ]);
                 };
                 this.preventClick = true;
                 event.preventDefault();
@@ -1949,9 +1960,6 @@ export class WYSIWYG {
             const range = getSelection().getRangeAt(0);
             if (this.element === range.startContainer || this.element.contains(range.startContainer)) {
                 protyle.toolbar.range = range.cloneRange();
-                // 失焦前保存滚动位置，供 zoomOut 在重载后恢复，防止浏览器焦点切换导致 scrollTop 归零
-                // https://github.com/siyuan-note/siyuan/issues/17886
-                (protyle as any).scrollTopBeforeBlur = protyle.contentElement.scrollTop;
             }
         });
 
@@ -2786,13 +2794,41 @@ export class WYSIWYG {
             }
         });
 
-        this.element.addEventListener("dblclick", (event: MouseEvent & { target: HTMLElement }) => {
-            if (event.target.tagName === "IMG" && !event.target.classList.contains("emoji")) {
+        this.element.addEventListener("dblclick", (event: MouseEvent) => {
+            const target = event.target as HTMLElement;
+            // 双击超级块拖拽手柄，均分所有列宽
+            if (target.classList.contains("sb__resize")) {
+                const doOperations: IOperation[] = [];
+                const undoOperations: IOperation[] = [];
+                Array.from(target.parentElement.children).forEach((item: HTMLElement) => {
+                    // 没有任何子块设过 width，无需重置
+                    if (!item.style.width && !item.style.flex) {
+                        return;
+                    }
+                    if (!item.style.width && !item.style.flex) {
+                        return;
+                    }
+                    const oldHTML = item.outerHTML;
+                    item.style.width = "";
+                    item.style.flex = "";
+                    const id = item.getAttribute("data-node-id");
+                    doOperations.push({action: "update", id, data: item.outerHTML});
+                    undoOperations.push({action: "update", id, data: oldHTML});
+                });
+
+                if (doOperations.length > 0) {
+                    transaction(protyle, doOperations, undoOperations);
+                }
+                event.stopPropagation();
+                event.preventDefault();
+                return;
+            }
+            if (target.tagName === "IMG" && !target.classList.contains("emoji")) {
                 previewDocImage((event.target as HTMLElement).getAttribute("src"), protyle.block.rootID);
                 return;
             }
             // https://github.com/siyuan-note/siyuan/issues/12691
-            const diagramElement = getDiagramBlock(hasClosestBlock(event.target) as HTMLElement);
+            const diagramElement = getDiagramBlock(hasClosestBlock(target) as HTMLElement);
             if (diagramElement) {
                 previewDiagram(diagramElement);
                 event.stopPropagation();

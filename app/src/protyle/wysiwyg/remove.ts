@@ -172,20 +172,20 @@ export const removeBlock = async (protyle: IProtyle, blockElement: Element, rang
                 // 删除列表项内容块后，若该列表项仅剩子列表而无内容块，需补一个空段落
                 // 避免"列表项下直接挂列表"的非法结构 https://github.com/siyuan-note/siyuan/issues/17892
                 const liChildren = Array.from(topParentElement.children);
-                const liSubList = liChildren.find(item => item.classList.contains("list"));
-                const liHasContent = liChildren.some(item => item.hasAttribute("data-node-id") &&
-                    !item.classList.contains("list") && !item.classList.contains("protyle-action") &&
-                    !item.classList.contains("protyle-attr"));
-                if (topParentElement.classList.contains("li") && liSubList && !liHasContent) {
+                // 首个子块是列表块时，说明列表项下直接挂列表，需补一个空段落作为内容块
+                // https://github.com/siyuan-note/siyuan/issues/17892
+                const firstBlock = liChildren.find(item => item.hasAttribute("data-node-id") &&
+                    !item.classList.contains("protyle-action") && !item.classList.contains("protyle-attr"));
+                if (topParentElement.classList.contains("li") && firstBlock?.classList.contains("list")) {
                     const emptyID = Lute.NewNodeID();
-                    const emptyElement = genEmptyElement(false, true, emptyID);
-                    // 空段落插到列表标记之后、子列表之前，与服务端 doInsert 通过 nextID 定位的位置一致
+                    const emptyElement = genEmptyElement(false, false, emptyID);
+                    // 空段落插到列表标记之后、首个子块之前，与服务端 doInsert 通过 nextID 定位的位置一致
                     liChildren.find(item => item.classList.contains("protyle-action"))?.after(emptyElement);
                     deletes.push({
                         action: "insert",
                         id: emptyID,
                         data: emptyElement.outerHTML,
-                        nextID: liSubList.getAttribute("data-node-id"),
+                        nextID: firstBlock.getAttribute("data-node-id"),
                         parentID: topParentElement.getAttribute("data-node-id"),
                     });
                     inserts.push({
@@ -683,7 +683,7 @@ export const removeImage = (imgSelectElement: Element, nodeElement: HTMLElement,
     }
 };
 
-const removeLi = (protyle: IProtyle, blockElement: Element, range: Range, isDelete = false) => {
+const removeLi = async (protyle: IProtyle, blockElement: Element, range: Range, isDelete = false) => {
     if (!blockElement.parentElement.previousElementSibling && blockElement.parentElement.nextElementSibling && blockElement.parentElement.nextElementSibling.classList.contains("protyle-attr")) {
         listOutdent(protyle, [blockElement.parentElement], range, isDelete, blockElement);
         return;
@@ -768,7 +768,6 @@ const removeLi = (protyle: IProtyle, blockElement: Element, range: Range, isDele
             data: listHTML,
             id: listElement.getAttribute("data-node-id"),
         });
-        transaction(protyle, doOperations, undoOperations);
         if (listElement.parentElement.classList.contains("sb") &&
             listElement.parentElement.getAttribute("data-sb-layout") === "col") {
             const selectsElement: Element[] = [];
@@ -780,14 +779,19 @@ const removeLi = (protyle: IProtyle, blockElement: Element, range: Range, isDele
                 }
                 previousElement = previousElement.previousElementSibling;
             }
-            turnsIntoOneTransaction({
+            // 合并到同一个 transaction，避免新超级块 id 在第二个 transaction 中找不到
+            const mergeOperations = await turnsIntoOneTransaction({
                 protyle,
                 selectsElement: selectsElement.reverse(),
                 type: "BlocksMergeSuperBlock",
                 level: "row",
                 unfocus: true,
+                getOperations: true,
             });
+            doOperations.push(...mergeOperations.doOperations);
+            undoOperations.splice(0, 0, ...mergeOperations.undoOperations);
         }
+        transaction(protyle, doOperations, undoOperations);
         focusByWbr(protyle.wysiwyg.element, range);
         return;
     }
