@@ -13,7 +13,7 @@ env:
 jobs:
   prepare:
     name: Prepare
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     outputs:
       release_version: ${{ steps.release_info.outputs.release_version }}
       version: ${{ steps.version.outputs.value }}
