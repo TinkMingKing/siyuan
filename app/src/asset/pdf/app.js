@@ -90,7 +90,7 @@ import {Toolbar} from "./toolbar";
 import {ViewHistory} from "./view_history.js";
 import {hasClosestByClassName} from "../../protyle/util/hasClosest";
 import {Constants} from "../../constants";
-import {getPdfInstance, hlPDFRect} from "../anno";
+import {getPdfInstance, hlPDFInk, hlPDFRect} from "../anno";
 
 const FORCE_PAGES_LOADED_TIMEOUT = 10000; // ms
 
@@ -2473,6 +2473,8 @@ function onPageNumberChanged(evt) {
     // NOTE
     if (evt.id) {
         hlPDFRect(it.pdfViewer.container, evt.id)
+        // 手写标注同样需要滚动定位并强调，效果与框选标注保持一致
+        hlPDFInk(it.pdfViewer.container, evt.id)
     }
     // Ensure that the page number input displays the correct value, even if the
     // value entered by the user was invalid (e.g. a floating point number).

@@ -22,7 +22,7 @@
 
 import { normalizeUnicode, TextLayer } from "./pdfjs";
 import { removeNullCharacters } from "./ui_utils.js";
-import {getHighlight} from "../anno";
+import {getHighlight, getInk} from "../anno";
 
 /**
  * @typedef {Object} TextLayerBuilderOptions
@@ -84,6 +84,7 @@ class TextLayerBuilder {
       // NOTE
       this.div.querySelector(".pdf__rects")?.remove()
       getHighlight(this.div)
+      getInk(this.div)
       return;
     }
 
@@ -117,6 +118,7 @@ class TextLayerBuilder {
     this.highlighter?.enable();
     // NOTE
     getHighlight(this.div)
+    getInk(this.div)
     this.accessibilityManager?.enable();
   }
 

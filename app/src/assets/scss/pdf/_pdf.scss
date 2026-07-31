@@ -869,6 +869,54 @@ a:focus > .thumbnail > .thumbnailSelectionRing,
   }
 }
 
+.ink-to-annotation {
+  cursor: crosshair !important;
+  user-select: none;
+
+  *:not(input):not(textarea):not(button):not(select):not(:link) {
+    cursor: inherit !important;
+    user-select: auto;
+  }
+}
+
+/* 橡皮擦模式：禁用触摸滚动/缩放手势，避免擦除时页面跟随手指移动 */
+.ink-erase-annotation {
+  // 橡皮擦光标，复用内置 iconEraser 的简洁样式，热点位于橡皮尖端（约 5 21）
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='m7 21-4.5-4.5a2 2 0 0 1 0-2.83l9.17-9.17a2 2 0 0 1 2.83 0l4.5 4.5a2 2 0 0 1 0 2.83L12.83 21z'/><path d='m5 17 7.5-7.5'/><path d='m15 19h6'/></svg>") 5 21, cell !important;
+  touch-action: none !important;
+
+  *:not(input):not(textarea):not(button):not(select):not(:link) {
+    cursor: inherit !important;
+    touch-action: none !important;
+  }
+}
+
+/* 手写标注的 SVG 覆盖层：定位到页面左上角并铺满文本层，使其用户坐标系与 PDF 视口 CSS 像素 1:1 对齐，
+   这样笔画坐标（convertToViewportPoint 的结果）在不同缩放下都能正确贴合页面 */
+.pdf__inks {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  mix-blend-mode: normal;
+  overflow: hidden;
+}
+
+/* 仅笔画本身可点击选中，空白处透传给文本选择 */
+.pdf__ink {
+  pointer-events: auto;
+
+  /* 深链跳转定位时的强调：与框选标注一致的淡入效果，1.5s 后由脚本移除 */
+  &--hl {
+    transition: opacity 1500ms linear;
+    animation-duration: 1s;
+    animation-fill-mode: both;
+    animation-name: fadeIn;
+  }
+}
+
 .grab-to-pan-grab {
   //cursor: url("images/grab.cur"), move !important;
   cursor: grab !important;

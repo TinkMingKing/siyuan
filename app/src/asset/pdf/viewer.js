@@ -18,7 +18,7 @@ import { AppOptions } from "./app_options.js";
 import { LinkTarget } from "./pdf_link_service.js";
 import { PDFViewerApplication } from "./app.js";
 import {Constants} from "../../constants";
-import {initAnno} from "../anno";
+import {initAnno, initInk} from "../anno";
 import {AnnotationEditorType} from "./pdfjs";
 
 /* eslint-disable-next-line no-unused-vars */
@@ -47,6 +47,10 @@ function getViewerConfiguration(element) {
     viewerContainer: element.querySelector("#viewer"),
     toolbar: {
       rectAnno: element.querySelector("#rectAnno"),
+      inkAnno: element.querySelector("#inkAnno"),
+      inkErase: element.querySelector("#inkErase"),
+      inkUndo: element.querySelector("#inkUndo"),
+      inkRedo: element.querySelector("#inkRedo"),
       container: element.querySelector("#toolbarContainer"),
       numPages: element.querySelector("#numPages"),
       pageNumber: element.querySelector("#pageNumber"),
@@ -270,6 +274,7 @@ function webViewerLoad(file, element, pdfPage, annoId) {
   }
   pdf.run(config);
   initAnno(element, pdf);
+  initInk(element, pdf);
   return pdf
 }
 

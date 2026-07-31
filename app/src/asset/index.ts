@@ -63,7 +63,17 @@ export class Asset extends Model {
             if (response.code !== 1) {
                 const config = JSON.parse(response.data.data);
                 if (config[this.pdfId]) {
-                    this.pdfPage = config[this.pdfId].page ? config[this.pdfId].page + 1 : config[this.pdfId].pages[0].index + 1;
+                    const item = config[this.pdfId];
+                    // 手写标注使用 inkPages 而非 pages，深链跳转时需分别适配
+                    if (item.page !== undefined) {
+                        this.pdfPage = item.page + 1;
+                    } else if (item.pages && item.pages[0]) {
+                        this.pdfPage = item.pages[0].index + 1;
+                    } else if (item.inkPages && item.inkPages[0]) {
+                        this.pdfPage = item.inkPages[0].index + 1;
+                    } else {
+                        this.pdfPage = undefined;
+                    }
                 } else {
                     this.pdfPage = undefined;
                 }
@@ -105,6 +115,9 @@ export class Asset extends Model {
         } else if (type === ".pdf") {
             /// #if !MOBILE
             if (!isInit) {
+                if (this.pdfObject && this.pdfObject.appConfig && this.pdfObject.appConfig.onInkKeyDownCleanup) {
+                    this.pdfObject.appConfig.onInkKeyDownCleanup();
+                }
                 this.pdfObject.close();
             }
             this.element.innerHTML = `<div class="pdf__outer" id="outerContainer">
@@ -295,6 +308,18 @@ export class Asset extends Model {
                 </button>
                 <button id="rectAnno" class="toolbarButton b3-tooltips b3-tooltips__se" aria-expanded="false" aria-controls="findbar" aria-label="${window.siyuan.languages.rectAnnotation} ${updateHotkeyTip("⌘D")}/${updateHotkeyTip("⌥D")}">
                   <svg><use xlink:href="#iconLeftTop"></use></svg>
+                </button>
+                <button id="inkAnno" class="toolbarButton b3-tooltips b3-tooltips__se" aria-expanded="false" aria-controls="findbar" aria-label="${window.siyuan.languages.inkAnnotation}">
+                  <svg><use xlink:href="#iconEdit"></use></svg>
+                </button>
+                <button id="inkErase" class="toolbarButton b3-tooltips b3-tooltips__se" aria-expanded="false" aria-controls="findbar" aria-label="${window.siyuan.languages.inkErase}">
+                  <svg><use xlink:href="#iconEraser"></use></svg>
+                </button>
+                <button id="inkUndo" class="toolbarButton b3-tooltips b3-tooltips__se" aria-expanded="false" aria-controls="findbar" aria-label="${window.siyuan.languages.inkUndo} ${updateHotkeyTip("⌘Z")}">
+                  <svg><use xlink:href="#iconUndo"></use></svg>
+                </button>
+                <button id="inkRedo" class="toolbarButton b3-tooltips b3-tooltips__se" aria-expanded="false" aria-controls="findbar" aria-label="${window.siyuan.languages.inkRedo} ${updateHotkeyTip("⌘Y")}">
+                  <svg><use xlink:href="#iconRedo"></use></svg>
                 </button>
                 <input type="number" id="pageNumber" class="toolbarField pageNumber b3-text-field" value="1" size="4" min="1" autocomplete="off">
                 <span id="numPages"></span>

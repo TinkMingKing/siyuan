@@ -487,11 +487,16 @@ interface IPdfAnno {
         index: number
         positions: number[]
     }[]
+    // 手写标注：每个页面包含若干笔画，每笔画为一组点，每点为 [x, y, pressure]，坐标为 PDF 归一化坐标
+    inkPages?: {
+        index: number
+        strokes: number[][][]
+    }[]
     index?: number,
     color: string,
-    type: string,   // border, text
-    content: string,    // rect, text
-    mode: string,
+    type: string,   // border, text, ink
+    content: string,    // rect, text, ink
+    mode: string,   // "rect" | "text" | "ink"
     id?: string,
     coords?: number[]
     ids?: string[]

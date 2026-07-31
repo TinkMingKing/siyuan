@@ -495,7 +495,9 @@ export const showPopover = async (app: App, showRef = false) => {
         if (popoverTargetElement.classList.contains("protyle-attr--refcount")) {
             // 编辑器中的引用数
             targetId = popoverTargetElement.parentElement.parentElement.getAttribute("data-node-id");
-        } else if (popoverTargetElement.classList.contains("pdf__rect")) {
+        } else if (popoverTargetElement.classList.contains("pdf__rect") ||
+            popoverTargetElement.classList.contains("pdf__ink")) {
+            // 框选标注与手写标注均按标注 ID 查询引用它的块
             const relationIds = popoverTargetElement.getAttribute("data-relations");
             if (relationIds) {
                 relationIds.split(",").forEach((item: string) => {
