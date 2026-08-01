@@ -1,0 +1,159 @@
+name: Build Android APK (test signing)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - '*-alpha*'
+      - '*-beta*'
+      - '*-rc*'
+
+jobs:
+  build_android_apk:
+    name: Build android.apk (test signing)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          path: ${{ github.workspace }}/go/src/github.com/${{ github.repository }}
+
+      - name: Extract version and packageManager
+        run: |
+          echo "VERSION=$(jq .version ${{ github.workspace }}/go/src/github.com/${{ github.repository }}/app/package.json -r)" >> $GITHUB_ENV
+          echo "PACKAGE_MANAGER=$(jq .packageManager ${{ github.workspace }}/go/src/github.com/${{ github.repository }}/app/package.json -r)" >> $GITHUB_ENV
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ github.workspace }}/go/src/github.com/${{ github.repository }}/kernel/go.mod
+          cache-dependency-path: ${{ github.workspace }}/go/src/github.com/${{ github.repository }}/kernel/go.sum
+          cache: true
+      - run: go version
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install Node pnpm
+        run: npm install -g ${{ env.PACKAGE_MANAGER }}
+        working-directory: ${{ github.workspace }}/go/src/github.com/${{ github.repository }}/app
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('app/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - name: Install Node Dependencies
+        run: pnpm install --no-frozen-lockfile
+        working-directory: ${{ github.workspace }}/go/src/github.com/${{ github.repository }}/app
+
+      - name: Building UI
+        run: pnpm run build
+        working-directory: ${{ github.workspace }}/go/src/github.com/${{ github.repository }}/app
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android NDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)
+          fi
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager not found under $ANDROID_HOME/cmdline-tools/"
+            exit 1
+          fi
+          echo "Using sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "ndk;28.2.13676358" > /dev/null
+          NDK_DIR="$ANDROID_HOME/ndk/28.2.13676358"
+          echo "ANDROID_NDK_HOME=$NDK_DIR" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$NDK_DIR" >> $GITHUB_ENV
+
+      - name: Set up gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@2553ed8ce294
+          echo "$GOPATH/bin" >> $GITHUB_PATH
+          "$GOPATH/bin/gomobile" init
+        env:
+          GOPATH: ${{ github.workspace }}/go
+
+      - name: Building Android Kernel
+        run: gomobile bind -tags "fts5 sqlcipher" -ldflags "-s -w" -v -o kernel.aar -target android/arm64 -androidapi 26 ./mobile/
+        working-directory: ${{ github.workspace }}/go/src/github.com/${{ github.repository }}/kernel
+        env:
+          GOPATH: ${{ github.workspace }}/go
+          CGO_ENABLED: 1
+          JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8
+
+      - name: Checkout siyuan-android
+        uses: actions/checkout@v6
+        with:
+          repository: siyuan-note/siyuan-android
+          ref: main
+          path: ${{ github.workspace }}/siyuan-android
+
+      - name: Patch siyuan-android Repositories
+        run: |
+          sed -i '/maven.aliyun.com/d' build.gradle
+          echo "=== Patched build.gradle repositories ==="
+          grep -A 6 "repositories" build.gradle | head -20
+        working-directory: ${{ github.workspace }}/siyuan-android
+
+      - name: Prepare siyuan-android Build Inputs
+        run: |
+          mkdir -p ${{ github.workspace }}/siyuan-android/app/libs
+          cp ${{ github.workspace }}/go/src/github.com/${{ github.repository }}/kernel/kernel.aar \
+             ${{ github.workspace }}/siyuan-android/app/libs/kernel.aar
+          cd ${{ github.workspace }}/go/src/github.com/${{ github.repository }}/app
+          node scripts/trimChangelogs.js
+          zip -r app.zip appearance guide stage $([ -d changelogs ] && echo changelogs)
+          zip -j app.zip ../LICENSE ../THIRD_PARTY_NOTICES.md
+          mkdir -p ${{ github.workspace }}/siyuan-android/app/src/main/assets
+          cp app.zip ${{ github.workspace }}/siyuan-android/app/src/main/assets/app.zip
+
+      - name: Inject Test Signing Config
+        # 使用 Android 标准 debug 测试签名(密码 android / 别名 androiddebugkey),
+        # 不依赖任何仓库密钥库 secret,避免 fork 仓库未配置 ANDROID_* secrets 时安卓打包失败。
+        run: |
+          keytool -genkeypair -v \
+            -keystore ${{ github.workspace }}/siyuan-android/app/siyuan-android.jks \
+            -storepass android -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 36500 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          cat > ${{ github.workspace }}/siyuan-android/signings.gradle <<EOF
+          android {
+            signingConfigs {
+              siyuanConfig {
+                storeFile file("siyuan-android.jks")
+                storePassword "android"
+                keyAlias "androiddebugkey"
+                keyPassword "android"
+              }
+            }
+          }
+          EOF
+
+      - name: Building Android App
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          chmod +x ./gradlew
+          ./gradlew assembleOfficialRelease
+          cd app/build/outputs/apk/official/release
+          mv siyuan-*-official-release.apk siyuan-${{ env.VERSION }}.apk
+        working-directory: ${{ github.workspace }}/siyuan-android
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: siyuan-android-apk
+          path: ${{ github.workspace }}/siyuan-android/app/build/outputs/apk/official/release/siyuan-${{ env.VERSION }}.apk
