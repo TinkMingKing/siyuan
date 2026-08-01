@@ -513,26 +513,29 @@ jobs:
           mkdir -p ${{ github.workspace }}/siyuan-android/app/src/main/assets
           cp app.zip ${{ github.workspace }}/siyuan-android/app/src/main/assets/app.zip
 
-      - name: Inject Signing Config
+      - name: Inject Test Signing Config
+        # 使用 Android 标准 debug 测试签名(密码 android / 别名 androiddebugkey),
+        # 不依赖任何仓库密钥库 secret,避免 fork 仓库未配置 ANDROID_* secrets 时安卓打包失败。
+        # 与 siyuan-android 仓库 signings.templates.gradle 模板中的测试签名值保持一致。
         run: |
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > ${{ github.workspace }}/siyuan-android/app/siyuan-android.jks
+          keytool -genkeypair -v \
+            -keystore ${{ github.workspace }}/siyuan-android/app/siyuan-android.jks \
+            -storepass android -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 36500 \
+            -dname "CN=Android Debug,O=Android,C=US"
           cat > ${{ github.workspace }}/siyuan-android/signings.gradle <<EOF
           android {
             signingConfigs {
               siyuanConfig {
                 storeFile file("siyuan-android.jks")
-                storePassword "$ANDROID_KEYSTORE_PASSWORD"
-                keyAlias "$ANDROID_KEY_ALIAS"
-                keyPassword "$ANDROID_KEY_PASSWORD"
+                storePassword "android"
+                keyAlias "androiddebugkey"
+                keyPassword "android"
               }
             }
           }
           EOF
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
       - name: Building Android App
         # local.properties 被 siyuan-android 的 .gitignore 忽略,CI 里需现场生成,
