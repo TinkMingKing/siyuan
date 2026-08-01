@@ -881,8 +881,8 @@ a:focus > .thumbnail > .thumbnailSelectionRing,
 
 /* 橡皮擦模式：禁用触摸滚动/缩放手势，避免擦除时页面跟随手指移动 */
 .ink-erase-annotation {
-  // 橡皮擦光标，复用内置 iconEraser 的简洁样式，热点位于橡皮尖端（约 5 21）
-  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='m7 21-4.5-4.5a2 2 0 0 1 0-2.83l9.17-9.17a2 2 0 0 1 2.83 0l4.5 4.5a2 2 0 0 1 0 2.83L12.83 21z'/><path d='m5 17 7.5-7.5'/><path d='m15 19h6'/></svg>") 5 21, cell !important;
+  // 橡皮擦光标，与内置 iconEraser 保持一致的 Lucide 风格，热点位于橡皮尖端（约 4 17）
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M21 21H8a2 2 0 0 1-1.42-.587l-3.994-3.999a2 2 0 0 1 0-2.828l10-10a2 2 0 0 1 2.829 0l5.999 6a2 2 0 0 1 0 2.828L12.834 21'/><path d='m5.082 11.09 8.828 8.828'/></svg>") 4 17, cell !important;
   touch-action: none !important;
 
   *:not(input):not(textarea):not(button):not(select):not(:link) {
