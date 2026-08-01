@@ -1,3 +1,16 @@
+// Promise.withResolvers polyfill: PDF.js 依赖该较新 API（Chrome 119+/Safari 17.4+），
+// 旧 WebView/浏览器（如部分安卓系统 WebView）不支持，需在入口先行兜底，否则 main.js 加载即崩溃。
+if (typeof Promise.withResolvers === "undefined") {
+    Promise.withResolvers = function () {
+        let resolve, reject;
+        const promise = new Promise((res, rej) => {
+            resolve = res;
+            reject = rej;
+        });
+        return {promise, resolve, reject};
+    };
+}
+
 import {Constants} from "./constants";
 import {Menus} from "./menus";
 import {Model} from "./layout/Model";
